@@ -49,7 +49,8 @@ Clone with the submodule: `git clone --recurse-submodules <url>`
    requested, and the vegetation percent is computed straight from the encoded
    polygons. Images without a full-scene segmentation (e.g. old images that
    only kept a few sign detections) are dropped.
-5. When all small tiles of a big tile are done, it is written to
+5. Big tiles are processed from the city center outwards (unfinished ones
+   first). When all small tiles of a big tile are done, it is written to
    `data/<city_slug>/tiles/<z>_<x>_<y>.parquet`.
 
 ### Output schema (GeoParquet, EPSG:4326)

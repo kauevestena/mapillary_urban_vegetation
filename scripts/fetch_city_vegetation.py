@@ -162,14 +162,18 @@ def _is_area(result):
 
 def _relation_or_way_polygon(osm_type, osm_id, result):
     """Polygon of a relation or way: Nominatim lookup, then polygons.openstreetmap.fr (relations)."""
+    result = {**result, "osm_type": osm_type, "osm_id": osm_id}
     try:
         found = _nominatim(
             "lookup", {"osm_ids": f"{osm_type[0].upper()}{osm_id}", "format": "jsonv2", "polygon_geojson": 1}
         )
         for item in found:
+            # keep the names even if the polygon has to come from elsewhere
+            result.update({k: v for k, v in item.items() if k != "geojson" and v is not None})
             polygon = _as_polygon(item.get("geojson"))
             if polygon is not None:
-                return polygon, {**result, **item}
+                return polygon, result
+        print(f"   Nominatim lookup of {osm_type} {osm_id} gave no polygon")
     except Exception as e:
         print(f"   Nominatim lookup of {osm_type} {osm_id} failed: {e}")
 
@@ -181,7 +185,8 @@ def _relation_or_way_polygon(osm_type, osm_id, result):
             response.raise_for_status()
             polygon = _as_polygon(response.json())
             if polygon is not None:
-                return polygon, {**result, "osm_type": "relation", "osm_id": osm_id}
+                result.setdefault("display_name", result.get("name"))
+                return polygon, result
         except Exception as e:
             print(f"   polygons.openstreetmap.fr for relation {osm_id} failed: {e}")
 
@@ -710,10 +715,17 @@ def run(args, token):
     def out_of_time():
         return STOP_REQUESTED or (deadline is not None and now() >= deadline)
 
+    # unfinished tiles first, then from the center of the city outwards (the
+    # densest areas, and a useful map early on)
     order = {"in_progress": 0, "not_started": 1}
+    center = polygon.centroid if polygon.contains(polygon.centroid) else polygon.representative_point()
     todo = sorted(
         (t for t in big_tiles if progress["tiles"][tile_key(t)]["status"] != "completed"),
-        key=lambda t: (order[progress["tiles"][tile_key(t)]["status"]], tile_key(t)),
+        key=lambda t: (
+            order[progress["tiles"][tile_key(t)]["status"]],
+            tile_box(t).centroid.distance(center),
+            tile_key(t),
+        ),
     )
     if args.max_big_tiles:
         todo = todo[: args.max_big_tiles]

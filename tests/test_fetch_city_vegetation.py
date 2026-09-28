@@ -493,3 +493,21 @@ def test_error_classification(message, transient, rate_limited, rejected):
     assert fcv.is_transient(error) == transient
     assert fcv.is_rate_limited(error) == rate_limited
     assert fcv.is_token_rejected(error) == rejected
+
+
+def test_display_name_is_kept_when_the_polygon_comes_from_the_fallback(api):
+    api.lookup = {"R42": [{**CITY_RELATION}]}  # lookup has the names but no polygon
+    api.osmfr = {"type": "GeometryCollection", "geometries": [mapping(POLYGON)]}
+    polygon, source = fcv.fetch_boundary("Test City")
+    assert polygon.equals(POLYGON) and source["display_name"] == "Test City, Somewhere"
+
+
+def test_big_tiles_are_processed_from_the_center(tmp_path, api, monkeypatch):
+    # three big tiles in a row: the middle one is processed first
+    left = mercantile.Tile(BIG_A.x - 1, BIG_A.y, BIG_ZOOM)
+    polygon = MultiPolygon([fcv.tile_box(t).buffer(-INSET) for t in (left, BIG_A, BIG_B)])
+    started = []
+    monkeypatch.setattr(fcv, "load_or_fetch_boundary", lambda *a, **k: polygon)
+    monkeypatch.setattr(fcv, "small_tiles_for", lambda big, poly, zoom: started.append(fcv.tile_key(big)) or [])
+    fcv.run(make_args(tmp_path), TOKEN)
+    assert started[0] == fcv.tile_key(BIG_A)
