@@ -31,6 +31,7 @@ POLYGON = MultiPolygon([fcv.tile_box(t).buffer(-INSET) for t in (BIG_A, BIG_B)])
 
 DENSE_TILE = next(iter(mercantile.children(BIG_A, zoom=SMALL_ZOOM)))  # more images than --limit
 REFUSED_TILE = list(mercantile.children(BIG_B, zoom=SMALL_ZOOM))[5]  # "reduce the amount of data"
+DEEP_TILE = list(mercantile.children(BIG_B, zoom=SMALL_ZOOM))[2]  # 8 images packed in ~9 m
 
 
 # --- fake world ---------------------------------------------------------------
@@ -56,11 +57,15 @@ def make_images():
     for big in (BIG_A, BIG_B):
         for small in mercantile.children(big, zoom=SMALL_ZOOM):
             b = mercantile.bounds(small)
-            count = 5 if small == DENSE_TILE else 2
+            count = {DENSE_TILE: 5, DEEP_TILE: 8}.get(small, 2)
             for n in range(count):
-                lon = b.west + (b.east - b.west) * (n + 1) / (count + 1)
-                lat = b.south + (b.north - b.south) * (n + 1) / (count + 1)
-                kind = "sign" if (n == 1 and small != DENSE_TILE) else "veg"
+                if small == DEEP_TILE:  # 1e-5 degree steps along the diagonal
+                    lon = b.west + 3e-4 + n * 1e-5
+                    lat = b.south + 3e-4 + n * 1e-5
+                else:
+                    lon = b.west + (b.east - b.west) * (n + 1) / (count + 1)
+                    lat = b.south + (b.north - b.south) * (n + 1) / (count + 1)
+                kind = "sign" if (n == 1 and small not in (DENSE_TILE, DEEP_TILE)) else "veg"
                 images.append({
                     "id": f"{kind}-{fcv.tile_key(small)}-{n}",
                     "geometry": {"type": "Point", "coordinates": [lon, lat]},
@@ -85,8 +90,11 @@ class Response:
 
     def raise_for_status(self):
         if self.status_code >= 400:
+            kind = "Client" if self.status_code < 500 else "Server"
             raise requests.exceptions.HTTPError(
-                f"{self.status_code} Error for url: x?access_token={TOKEN}", response=self
+                f"{self.status_code} {kind} Error: x for url: https://graph.mapillary.com/images"
+                f"?bbox=-49.4012,-25.4291,-49.4007,-25.4287&access_token={TOKEN}",
+                response=self,
             )
 
 
@@ -279,3 +287,70 @@ def test_zoom_mismatch_is_refused(tmp_path, api):
     fcv.run(make_args(tmp_path, max_big_tiles=1), TOKEN)
     with pytest.raises(SystemExit):
         fcv.run(make_args(tmp_path, small_zoom=17), TOKEN)
+
+
+def test_deep_split_keeps_every_image(tmp_path, api):
+    fcv.run(make_args(tmp_path), TOKEN)
+    ids = set(read_all_tiles(tmp_path / "test-city-somewhere")["id"])
+    deep = {i["id"] for i in IMAGES if f"-{fcv.tile_key(DEEP_TILE)}-" in i["id"]}
+    assert len(deep) == 8 and deep <= ids
+    widths = [float(p["bbox"].split(",")[2]) - float(p["bbox"].split(",")[0]) for p in api.calls["images"]]
+    smallest_zoom18 = mercantile.bounds(DEEP_TILE).east - mercantile.bounds(DEEP_TILE).west
+    assert min(widths) < smallest_zoom18 / 2**3  # split beyond 3 extra zoom levels
+
+
+def test_rate_limit_backoff(tmp_path, api, monkeypatch):
+    target = next(i["id"] for i in IMAGES if i["id"].startswith("veg"))
+    failures = {"left": 2}
+    real = api.__call__
+    sleeps = []
+
+    def flaky(url, params=None, timeout=None, headers=None):
+        if url.endswith(f"/{target}/detections") and failures["left"]:
+            failures["left"] -= 1
+            return Response({"error": {"message": "Application request limit reached"}}, 429)
+        return real(url, params=params, timeout=timeout, headers=headers)
+
+    monkeypatch.setattr(requests, "get", flaky)
+    monkeypatch.setattr(fcv, "sleep", sleeps.append)
+    progress = fcv.run(make_args(tmp_path), TOKEN)
+
+    assert failures["left"] == 0 and progress["summary"]["completed"] == 2
+    assert target in set(read_all_tiles(tmp_path / "test-city-somewhere")["id"])
+    assert len(sleeps) >= 2 and max(sleeps) >= 2 * fcv.RATE_LIMIT_FACTOR  # rate limits wait longer
+
+
+def test_token_rejection_stops_the_run(tmp_path, api, monkeypatch):
+    real = api.__call__
+
+    def rejecting(url, params=None, timeout=None, headers=None):
+        if url.endswith("/detections"):
+            return Response({"error": {"message": "Invalid OAuth access token - Cannot parse access token"}}, 400)
+        return real(url, params=params, timeout=timeout, headers=headers)
+
+    monkeypatch.setattr(requests, "get", rejecting)
+    with pytest.raises(SystemExit) as excinfo:
+        fcv.run(make_args(tmp_path), TOKEN)
+    assert "rejected the token" in str(excinfo.value) and "secret" not in str(excinfo.value)
+    progress = json.loads((tmp_path / "test-city-somewhere" / "progress.json").read_text())
+    assert progress["summary"]["in_progress"] == 1  # checkpointed before stopping
+
+
+@pytest.mark.parametrize(
+    "message, transient, rate_limited, rejected",
+    [
+        ("429 Client Error: Too Many Requests for url: x", True, True, False),
+        ("Mapillary API error (HTTP 500): An unknown error has occurred", True, False, False),
+        ("503 Server Error: Service Unavailable for url: x", True, False, False),
+        ("500 Server Error: x (Please reduce the amount of data you're asking for)", False, False, False),
+        ("Mapillary API error (HTTP 400): Invalid OAuth access token", False, False, True),
+        ("401 Client Error: Unauthorized for url: x", False, False, True),
+        # digits of coordinates in the URL are not status codes
+        ("404 Client Error: Not Found for url: https://x/images?bbox=-49.4291,-25.5031,-49.401,-25.403", False, False, False),
+    ],
+)
+def test_error_classification(message, transient, rate_limited, rejected):
+    error = requests.exceptions.HTTPError(message)
+    assert fcv.is_transient(error) == transient
+    assert fcv.is_rate_limited(error) == rate_limited
+    assert fcv.is_token_rejected(error) == rejected

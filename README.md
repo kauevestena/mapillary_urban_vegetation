@@ -27,10 +27,15 @@ Clone with the submodule: `git clone --recurse-submodules <url>`
    `data/<city_slug>/boundary.geojson` (reused afterwards).
 2. The polygon is covered with **big tiles** (zoom 14, ~2.4 km) and each big
    tile with **small tiles** (zoom 18, ~150 m).
-3. For each small tile, all image metadata is requested from Mapillary. If the
-   API refuses the tile or returns a possibly truncated list (as many images
-   as the request limit), the tile is split into its 4 children, down to 3
-   extra zoom levels.
+3. For each small tile, all image metadata is requested from Mapillary. While
+   the API refuses a tile or returns as many images as the request limit
+   (2000, so possibly truncated), the tile is recursively split into its 4
+   children, so that no image is lost.
+   Requests are retried with [tenacity](https://tenacity.readthedocs.io):
+   exponential backoff with jitter on network errors and HTTP 5xx, and a
+   longer wait on rate limiting (HTTP 429), during which all parallel
+   requests pause. If Mapillary rejects the token, the run checkpoints and
+   stops.
 4. For each image inside the city, its detections (semantic segmentation) are
    requested, and the vegetation percent is computed straight from the encoded
    polygons. Images without a full-scene segmentation (e.g. old images that

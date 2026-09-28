@@ -26,6 +26,7 @@ import os
 import re
 import signal
 import sys
+import threading
 import time
 import unicodedata
 from concurrent.futures import ThreadPoolExecutor
@@ -38,6 +39,7 @@ import pandas as pd
 import requests
 from shapely.geometry import Point, box, mapping, shape
 from shapely.prepared import prep
+from tenacity import Retrying, retry_if_exception, stop_after_attempt, wait_exponential_jitter
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "my_mappilary_api"))
@@ -50,9 +52,15 @@ USER_AGENT = "mapillary_urban_vegetation (https://github.com/kauevestena/mapilla
 IMAGE_FIELDS = ["id", "geometry", "computed_geometry", "altitude", "computed_altitude", "captured_at"]
 VEGETATION_CLASS = "nature--vegetation"
 
-# how many zoom levels a small tile can be split into when the API refuses it
-# or its result is truncated
-MAX_EXTRA_ZOOM = 3
+# A tile is split into its 4 children until each request returns fewer images
+# than the limit. This zoom (~0.5 m tiles) is only a safety floor: reaching it
+# means more than `limit` images share the same spot.
+MAX_SPLIT_ZOOM = 26
+
+# retries of a failed request (network errors, HTTP 5xx, rate limiting)
+RETRY_ATTEMPTS = 6
+# rate-limited requests wait this many times longer than other retries
+RATE_LIMIT_FACTOR = 5
 
 # checkpoint the in-progress big tile at least this often (seconds)
 CHECKPOINT_INTERVAL = 600
@@ -222,25 +230,104 @@ def save_progress(progress, path):
 # ---------------------------------------------------------------------------
 
 
-def with_retries(call, token, attempts=3, base_delay=2):
-    for attempt in range(attempts):
-        try:
-            return call()
-        except Exception as e:
-            message = str(e).lower()
-            # a refused (too dense) query is answered by splitting the tile, not by retrying
-            if attempt == attempts - 1 or "reduce the amount of data" in message:
-                raise
-            delay = base_delay * 2**attempt * (5 if "429" in message or "rate" in message else 1)
-            print(f"   retrying in {delay}s: {mly.redact_token(e, token)[:200]}", flush=True)
-            sleep(delay)
+class TokenRejected(Exception):
+    """The API rejected the token: no point in trying other tiles."""
 
 
-def images_of_tile(tile, token, limit, max_zoom):
+def is_refused(error):
+    """The API refuses a too dense query; the tile must be split, not retried."""
+    return "reduce the amount of data" in str(error).lower()
+
+
+# Status codes as they appear in error messages: "429 Client Error: ..." from
+# requests, "(HTTP 429)" from my_mappilary_api. Bare numbers are not matched,
+# since messages also contain URLs with coordinates.
+def _has_status(message, pattern):
+    return re.search(rf"\b({pattern}) (client|server) error|\(http ({pattern})\)", message) is not None
+
+
+def is_rate_limited(error):
+    message = str(error).lower()
+    return _has_status(message, "429") or "too many requests" in message or "rate limit" in message
+
+
+def is_token_rejected(error):
+    message = str(error).lower()
+    return (
+        _has_status(message, "401|403")
+        or "oauth" in message
+        or "invalid token" in message
+        or "access token" in message
+    )
+
+
+def is_transient(error):
+    """Errors worth retrying: network failures, HTTP 5xx and rate limiting."""
+    if is_refused(error) or is_token_rejected(error):
+        return False
+    return (
+        isinstance(error, (requests.exceptions.ConnectionError, requests.exceptions.Timeout))
+        or is_rate_limited(error)
+        or _has_status(str(error).lower(), r"5\d\d")
+    )
+
+
+# When any request is rate limited, every worker thread pauses until then.
+_pause_lock = threading.Lock()
+_pause_until = 0.0
+
+
+def _wait_for_pause():
+    with _pause_lock:
+        remaining = _pause_until - now()
+    if remaining > 0:
+        sleep(remaining)
+
+
+def _retry_wait(retry_state):
+    delay = wait_exponential_jitter(initial=2, max=120, jitter=2)(retry_state)
+    if is_rate_limited(retry_state.outcome.exception()):
+        delay *= RATE_LIMIT_FACTOR
+    return delay
+
+
+def with_retries(call, token):
+    """Call the API with tenacity: exponential backoff, longer and shared when rate limited."""
+
+    def before_sleep(retry_state):
+        global _pause_until
+        error = retry_state.outcome.exception()
+        delay = retry_state.next_action.sleep
+        if is_rate_limited(error):
+            with _pause_lock:
+                _pause_until = max(_pause_until, now() + delay)
+        print(
+            f"   retry {retry_state.attempt_number}/{RETRY_ATTEMPTS - 1} in {delay:.0f}s: "
+            f"{mly.redact_token(error, token)[:200]}",
+            flush=True,
+        )
+
+    retrying = Retrying(
+        retry=retry_if_exception(is_transient),
+        stop=stop_after_attempt(RETRY_ATTEMPTS),
+        wait=_retry_wait,
+        sleep=lambda seconds: sleep(seconds),  # module-level sleep, replaced in tests
+        before_sleep=before_sleep,
+        reraise=True,
+    )
+    for attempt in retrying:
+        with attempt:
+            _wait_for_pause()
+            result = call()
+    return result
+
+
+def images_of_tile(tile, token, limit, max_zoom=MAX_SPLIT_ZOOM):
     """
-    All images whose location falls in the tile. The tile is split into its
-    children when the API refuses it or returns a possibly truncated list.
-    Returns (images, saturated), saturated meaning max_zoom was reached with a
+    All images whose location falls in the tile. The tile is recursively split
+    into its 4 children while the API refuses it or returns `limit` images (a
+    possibly truncated list), so that no image is lost. Returns (images,
+    saturated), saturated meaning the safety floor max_zoom was reached with a
     full result.
     """
     b = mercantile.bounds(tile)
@@ -254,7 +341,7 @@ def images_of_tile(tile, token, limit, max_zoom):
         images = data.get("data", [])
         too_much = len(images) >= limit
     except Exception as e:
-        if "reduce the amount of data" not in str(e).lower() or tile.z >= max_zoom:
+        if not is_refused(e) or tile.z >= max_zoom:
             raise
         images, too_much = [], True
 
@@ -303,9 +390,9 @@ def process_small_tile(tile, polygon, token, args, executor):
     Fetch the rows of one small tile. Raises if anything fails, so the tile
     stays not done and is retried later. Returns (rows, images_count).
     """
-    images, saturated = images_of_tile(tile, token, args.limit, tile.z + MAX_EXTRA_ZOOM)
+    images, saturated = images_of_tile(tile, token, args.limit)
     if saturated:
-        print(f"⚠️  {tile_key(tile)}: more than {args.limit} images even at zoom {tile.z + MAX_EXTRA_ZOOM}; some may be missing")
+        print(f"⚠️  {tile_key(tile)}: {args.limit}+ images at a single spot (zoom {MAX_SPLIT_ZOOM}); some may be missing")
 
     prepared = prep(polygon)
     images = [i for i in images if prepared.contains(Point(i["geometry"]["coordinates"][:2]))]
@@ -332,7 +419,8 @@ def process_small_tile(tile, polygon, token, args, executor):
 
 def rows_to_gdf(rows):
     df = pd.DataFrame(rows, columns=COLUMNS + ["_small_tile"])
-    df["captured_at"] = pd.to_datetime(df["captured_at"], unit="ms", utc=True)
+    # always millisecond resolution, whether the values come from the API or a checkpoint
+    df["captured_at"] = pd.to_datetime(df["captured_at"], unit="ms", utc=True).astype("datetime64[ms, UTC]")
     for column in ("lon", "lat", "h", "vegetation_percent"):
         df[column] = df[column].astype(float)
     df["number_available_classes"] = df["number_available_classes"].astype("int64")
@@ -357,9 +445,9 @@ def load_partial(path, done):
     gdf = gpd.read_parquet(path)
     gdf = gdf[gdf["_small_tile"].isin(done)]
     df = pd.DataFrame(gdf.drop(columns="geometry"))
-    # back to epoch milliseconds, whatever the datetime resolution read from parquet
-    epoch = pd.Timestamp(0, tz="UTC")
-    df["captured_at"] = (df["captured_at"] - epoch) / pd.Timedelta(milliseconds=1)
+    # back to integer epoch milliseconds (no float round trip, which loses precision)
+    captured = df["captured_at"].astype("datetime64[ms, UTC]")
+    df["captured_at"] = captured.astype("int64").astype(object).where(captured.notna(), None)
     return df.to_dict("records")
 
 
@@ -428,6 +516,9 @@ def run(args, token):
                 try:
                     tile_rows, images = process_small_tile(small_tile, polygon, token, args, executor)
                 except Exception as e:
+                    if is_token_rejected(e):
+                        checkpoint(rows, done, state, partial_path, progress, progress_path)
+                        raise SystemExit(f"❌ Mapillary rejected the token: {mly.redact_token(e, token)[:300]}")
                     failures += 1
                     print(f"❌ {small_key}: {mly.redact_token(e, token)[:300]}", flush=True)
                     continue
