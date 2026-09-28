@@ -20,6 +20,12 @@ on:
       max_minutes:
         description: Time budget of the run (minutes)
         default: '320'
+      osm_relation:
+        description: OpenStreetMap relation ID of the boundary (optional, overrides the search)
+        default: ''
+      max_big_tiles:
+        description: Process at most this many big tiles (optional, e.g. 1 for a test run)
+        default: ''
 
 # never run two fetches at the same time (they would race on data/)
 concurrency:
@@ -57,12 +63,19 @@ jobs:
         BIG_ZOOM: ${{ github.event.inputs.big_zoom || '14' }}
         SMALL_ZOOM: ${{ github.event.inputs.small_zoom || '18' }}
         MAX_MINUTES: ${{ github.event.inputs.max_minutes || '320' }}
+        OSM_RELATION: ${{ github.event.inputs.osm_relation }}
+        MAX_BIG_TILES: ${{ github.event.inputs.max_big_tiles }}
       run: |
+        extra=()
+        if [ -n "$OSM_RELATION" ]; then extra+=(--osm-relation "$OSM_RELATION"); fi
+        if [ -n "$MAX_BIG_TILES" ]; then extra+=(--max-big-tiles "$MAX_BIG_TILES"); fi
         python scripts/fetch_city_vegetation.py "$PLACE" \
-          --big-zoom "$BIG_ZOOM" --small-zoom "$SMALL_ZOOM" --max-minutes "$MAX_MINUTES"
+          --big-zoom "$BIG_ZOOM" --small-zoom "$SMALL_ZOOM" --max-minutes "$MAX_MINUTES" "${extra[@]}"
 
     - name: Commit data
-      if: always()
+      # not on cancelled runs, which may stop anywhere; the script's own
+      # time budget checkpoints cleanly and ends as a success
+      if: success() || failure()
       run: |
         git config --local user.email "action@github.com"
         git config --local user.name "GitHub Action"

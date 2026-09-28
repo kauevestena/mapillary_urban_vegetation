@@ -98,21 +98,46 @@ class Response:
             )
 
 
+CENTER = POLYGON.centroid
+
+# the Nominatim results that broke the first real run: the city itself comes
+# without a polygon, another administrative area with one
+CITY_RELATION = {
+    "osm_type": "relation", "osm_id": 42, "category": "boundary", "type": "administrative",
+    "name": "Test City", "display_name": "Test City, Somewhere", "importance": 0.7,
+    "lat": str(CENTER.y), "lon": str(CENTER.x),
+}
+OTHER_AREA = {
+    "osm_type": "relation", "osm_id": 303895, "category": "boundary", "type": "administrative",
+    "name": "Canindé de São Francisco", "display_name": "Canindé de São Francisco, Sergipe", "importance": 0.4,
+    "lat": "-9.6", "lon": "-37.8", "geojson": mapping(box(-38.2, -9.8, -37.6, -9.4)),
+}
+
+
 class FakeAPI:
     def __init__(self):
-        self.calls = {"nominatim": 0, "images": [], "detections": []}
+        self.calls = {"nominatim": [], "osmfr": 0, "images": [], "detections": []}
+        self.search_results = [OTHER_AREA, CITY_RELATION]
+        self.lookup = {"R42": [{**CITY_RELATION, "geojson": mapping(POLYGON)}]}
+        self.reverse = {**CITY_RELATION, "geojson": mapping(POLYGON)}
+        self.osmfr = None  # polygons.openstreetmap.fr answer (None: HTTP 500)
 
     def __call__(self, url, params=None, timeout=None, headers=None):
         if url.startswith(fcv.NOMINATIM_URL):
-            self.calls["nominatim"] += 1
             assert headers and "User-Agent" in headers
-            return Response([
-                {"category": "place", "type": "city", "importance": 0.9,
-                 "geojson": mapping(box(-50, -26, -49, -25))},
-                {"category": "boundary", "type": "administrative", "importance": 0.5,
-                 "display_name": "Test City", "osm_type": "relation", "osm_id": 42,
-                 "geojson": mapping(POLYGON)},
-            ])
+            endpoint = url.rsplit("/", 1)[-1]
+            self.calls["nominatim"].append(endpoint)
+            if endpoint == "search":
+                assert "polygon_geojson" not in params
+                return Response(self.search_results)
+            if endpoint == "lookup":
+                found = self.lookup.get(params["osm_ids"])
+                return Response(found) if found is not None else Response({"error": "down"}, 503)
+            if endpoint == "reverse":
+                return Response(self.reverse)
+        if url.startswith(fcv.POLYGONS_OSM_FR_URL):
+            self.calls["osmfr"] += 1
+            return Response(self.osmfr) if self.osmfr else Response("error", 500)
         if url.endswith("/images"):
             self.calls["images"].append(params)
             assert params["access_token"] == TOKEN
@@ -147,6 +172,7 @@ def make_args(data_dir, **overrides):
     args = dict(
         place="Test City, Somewhere", big_zoom=BIG_ZOOM, small_zoom=SMALL_ZOOM, limit=3,
         max_minutes=None, max_big_tiles=None, workers=4, data_dir=str(data_dir), slug=None,
+        osm_relation=None, boundary_only=False,
     )
     args.update(overrides)
     return argparse.Namespace(**args)
@@ -163,14 +189,77 @@ def test_slugify():
     assert fcv.slugify("Curitiba, Paraná, Brazil") == "curitiba-parana-brazil"
 
 
-def test_boundary_prefers_administrative_and_is_reused(tmp_path, api):
+def test_boundary_picks_the_named_city_not_another_polygon(tmp_path, api):
     city_dir = tmp_path / "city"
-    polygon = fcv.load_or_fetch_boundary("Test City", city_dir)
-    assert polygon.equals(POLYGON)
-    again = fcv.load_or_fetch_boundary("Test City", city_dir)
-    assert again.equals(POLYGON) and api.calls["nominatim"] == 1
+    polygon = fcv.load_or_fetch_boundary("Test City, Somewhere", city_dir)
+    assert polygon.equals(POLYGON)  # from the lookup of relation 42, not Canindé's inline polygon
+    assert api.calls["nominatim"] == ["search", "lookup"]
+
+    again = fcv.load_or_fetch_boundary("Test City, Somewhere", city_dir)
+    assert again.equals(POLYGON) and len(api.calls["nominatim"]) == 2  # reused, no new request
     properties = json.loads((city_dir / "boundary.geojson").read_text())["features"][0]["properties"]
-    assert properties["osm_id"] == 42 and properties["place"] == "Test City"
+    assert properties["osm_id"] == 42 and properties["place"] == "Test City, Somewhere"
+
+
+def test_boundary_name_matching_ignores_accents_and_case(api):
+    api.search_results = [{**CITY_RELATION, "name": "Tést CITY"}]
+    polygon, source = fcv.fetch_boundary("test city")
+    assert polygon.equals(POLYGON) and source["osm_id"] == 42
+
+
+def test_boundary_of_a_city_node_comes_from_reverse_geocoding(api):
+    node = {**CITY_RELATION, "osm_type": "node", "osm_id": 7, "category": "place", "type": "city"}
+    api.search_results = [OTHER_AREA, node]
+    polygon, source = fcv.fetch_boundary("Test City")
+    assert polygon.equals(POLYGON) and source["osm_id"] == 42
+    assert api.calls["nominatim"] == ["search", "reverse"]
+
+    # a reverse result with another name is refused
+    api.reverse = {**OTHER_AREA}
+    with pytest.raises(ValueError, match="Could not get a polygon"):
+        fcv.fetch_boundary("Test City")
+
+
+def test_boundary_falls_back_to_polygons_openstreetmap_fr(api):
+    api.lookup = {}
+    api.osmfr = {"type": "GeometryCollection", "geometries": [mapping(POLYGON)]}
+    polygon, source = fcv.fetch_boundary("Test City")
+    assert polygon.equals(POLYGON) and api.calls["osmfr"] == 1
+
+
+def test_boundary_errors(api):
+    api.search_results = [OTHER_AREA]
+    with pytest.raises(ValueError, match="No OpenStreetMap result is named 'Test City'"):
+        fcv.fetch_boundary("Test City")
+
+    # a polygon that doesn't contain the city's own location is refused
+    api.search_results = [CITY_RELATION]
+    api.lookup = {"R42": [{**CITY_RELATION, "geojson": OTHER_AREA["geojson"]}]}
+    with pytest.raises(ValueError, match="Could not get a polygon"):
+        fcv.fetch_boundary("Test City")
+
+
+def test_osm_relation_skips_the_search(tmp_path, api):
+    polygon = fcv.load_or_fetch_boundary("anything", tmp_path / "city", osm_relation=42)
+    assert polygon.equals(POLYGON) and api.calls["nominatim"] == ["lookup"]
+
+
+def test_cached_boundary_of_another_place_is_refused(tmp_path, api):
+    city_dir = tmp_path / "city"
+    fcv.load_or_fetch_boundary("Test City", city_dir)
+    with pytest.raises(SystemExit, match="Delete"):
+        fcv.load_or_fetch_boundary("Test City, Elsewhere", city_dir)
+    with pytest.raises(SystemExit):
+        fcv.load_or_fetch_boundary("Test City", city_dir, osm_relation=99)
+
+
+def test_boundary_only(tmp_path, api, capsys):
+    assert fcv.run(make_args(tmp_path, boundary_only=True), TOKEN) is None
+    city_dir = tmp_path / "test-city-somewhere"
+    assert (city_dir / "boundary.geojson").exists()
+    assert not (city_dir / "progress.json").exists() and not (city_dir / "tiles").exists()
+    assert "2 big tiles at zoom 16" in capsys.readouterr().out
+    assert not api.calls["images"]
 
 
 def test_tiling():

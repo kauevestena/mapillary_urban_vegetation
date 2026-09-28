@@ -24,7 +24,14 @@ Clone with the submodule: `git clone --recurse-submodules <url>`
 ## How it works
 
 1. The city polygon is retrieved from OpenStreetMap (Nominatim) and saved to
-   `data/<city_slug>/boundary.geojson` (reused afterwards).
+   `data/<city_slug>/boundary.geojson` (reused afterwards). Only results
+   named like the first part of the place (e.g. "Curitiba" for "Curitiba,
+   Parana, Brazil", ignoring case and accents) are considered, preferring
+   administrative areas and settlements, then the most important one. Its
+   polygon comes from Nominatim (lookup, or the enclosing municipality for a
+   city point), with polygons.openstreetmap.fr as a fallback, and must contain
+   the city's own location. The candidates are printed in the log; use
+   `--osm-relation <id>` to choose the boundary explicitly.
 2. The polygon is covered with **big tiles** (zoom 14, ~2.4 km) and each big
    tile with **small tiles** (zoom 18, ~150 m).
 3. For each small tile, all image metadata is requested from Mapillary. While
@@ -74,13 +81,19 @@ python scripts/fetch_city_vegetation.py "Curitiba, Parana, Brazil" --max-minutes
 
 Options: `--big-zoom` (14), `--small-zoom` (18), `--limit` (2000 images per
 request), `--max-minutes`, `--max-big-tiles`, `--workers` (8 parallel
-detection requests), `--data-dir` (`data`), `--slug`. See `--help`.
+detection requests), `--data-dir` (`data`), `--slug`, `--osm-relation` (use
+this OSM relation as the boundary), `--boundary-only` (resolve and save the
+boundary, print its area and number of tiles, then exit; no token needed).
+See `--help`.
+
+To start a city over (e.g. after a wrong boundary), delete `data/<city_slug>/`.
 
 ## GitHub Action
 
 `.github/workflows/fetch-vegetation.yml` runs the fetcher every 6 hours (and
-on demand, with the place and zooms as inputs) with a 320-minute budget, then
-commits `data/`. It needs the Mapillary token as the `API_TOKEN` repository
+on demand, with the place, zooms, an optional OSM relation and an optional
+maximum number of big tiles as inputs) with a 320-minute budget, then commits
+`data/` (except for cancelled runs). It needs the Mapillary token as the `API_TOKEN` repository
 secret (Settings → Secrets and variables → Actions).
 
 ## Tests

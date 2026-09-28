@@ -38,6 +38,7 @@ import mercantile
 import pandas as pd
 import requests
 from shapely.geometry import Point, box, mapping, shape
+from shapely.ops import unary_union
 from shapely.prepared import prep
 from tenacity import Retrying, retry_if_exception, stop_after_attempt, wait_exponential_jitter
 
@@ -46,7 +47,9 @@ sys.path.insert(0, str(REPO_ROOT / "my_mappilary_api"))
 
 import mapillary_api as mly  # noqa: E402
 
-NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
+NOMINATIM_URL = "https://nominatim.openstreetmap.org"
+POLYGONS_OSM_FR_URL = "https://polygons.openstreetmap.fr/get_geojson.py"
+SETTLEMENT_TYPES = {"city", "town", "village", "municipality"}
 USER_AGENT = "mapillary_urban_vegetation (https://github.com/kauevestena/mapillary_urban_vegetation)"
 
 IMAGE_FIELDS = ["id", "geometry", "computed_geometry", "altitude", "computed_altitude", "captured_at"]
@@ -111,39 +114,174 @@ def write_json_atomic(data, path):
 # ---------------------------------------------------------------------------
 
 
-def fetch_boundary(place, timeout=60):
-    """Get the (Multi)Polygon of a place from Nominatim, preferring administrative boundaries."""
+def _normalize(text):
+    """Accent- and case-insensitive form of a name: 'Paraná ' -> 'parana'"""
+    text = unicodedata.normalize("NFKD", str(text or "")).encode("ascii", "ignore").decode("ascii")
+    return " ".join(text.lower().split())
+
+
+def _nominatim(path, params, timeout=60):
     response = requests.get(
-        NOMINATIM_URL,
-        params={"q": place, "format": "jsonv2", "polygon_geojson": 1, "limit": 10},
-        headers={"User-Agent": USER_AGENT},
-        timeout=timeout,
+        f"{NOMINATIM_URL}/{path}", params=params, headers={"User-Agent": USER_AGENT}, timeout=timeout
     )
     response.raise_for_status()
-    results = [
-        r for r in response.json()
-        if r.get("geojson", {}).get("type") in ("Polygon", "MultiPolygon")
-    ]
-    if not results:
-        raise ValueError(f"No polygon found on OpenStreetMap for '{place}'")
-
-    def rank(result):
-        administrative = result.get("category") == "boundary" and result.get("type") == "administrative"
-        return (administrative, float(result.get("importance") or 0))
-
-    best = max(results, key=rank)
-    return shape(best["geojson"]), best
+    sleep(1)  # Nominatim usage policy: at most 1 request per second
+    return response.json()
 
 
-def load_or_fetch_boundary(place, city_dir):
-    """Reuse data/<slug>/boundary.geojson if present, otherwise fetch and save it."""
+def _as_polygon(geojson):
+    """A (Multi)Polygon from a GeoJSON geometry (collections are merged), or None."""
+    if not geojson:
+        return None
+    geometry = shape(geojson)
+    if geometry.geom_type == "GeometryCollection":
+        parts = [g for g in geometry.geoms if g.geom_type in ("Polygon", "MultiPolygon")]
+        geometry = unary_union(parts) if parts else None
+    if geometry is None or geometry.is_empty or geometry.geom_type not in ("Polygon", "MultiPolygon"):
+        return None
+    return geometry if geometry.is_valid else geometry.buffer(0)
+
+
+def _describe(result):
+    return (
+        f"{result.get('display_name')} [{result.get('osm_type')} {result.get('osm_id')}, "
+        f"{result.get('category')}/{result.get('type')}, importance {float(result.get('importance') or 0):.2f}]"
+    )
+
+
+def _is_area(result):
+    category, kind = result.get("category"), result.get("type")
+    return (category == "boundary" and kind == "administrative") or (category == "place" and kind in SETTLEMENT_TYPES)
+
+
+def _polygon_of(result, wanted_name):
+    """
+    The polygon of a Nominatim result: its own (lookup) polygon for relations
+    and ways, polygons.openstreetmap.fr for relations as a fallback, and the
+    enclosing municipality (reverse geocoding) for nodes, such as place=city.
+    Returns (polygon, source result) or (None, None).
+    """
+    osm_type, osm_id = result.get("osm_type"), result.get("osm_id")
+
+    if osm_type in ("relation", "way"):
+        try:
+            found = _nominatim(
+                "lookup", {"osm_ids": f"{osm_type[0].upper()}{osm_id}", "format": "jsonv2", "polygon_geojson": 1}
+            )
+            for item in found:
+                polygon = _as_polygon(item.get("geojson"))
+                if polygon is not None:
+                    return polygon, {**result, **item}
+        except Exception as e:
+            print(f"   Nominatim lookup of {osm_type} {osm_id} failed: {e}")
+
+    if osm_type == "relation":
+        try:
+            response = requests.get(
+                POLYGONS_OSM_FR_URL, params={"id": osm_id, "params": 0}, headers={"User-Agent": USER_AGENT}, timeout=120
+            )
+            response.raise_for_status()
+            polygon = _as_polygon(response.json())
+            if polygon is not None:
+                return polygon, result
+        except Exception as e:
+            print(f"   polygons.openstreetmap.fr for relation {osm_id} failed: {e}")
+
+    if osm_type == "node" and result.get("lat") is not None:
+        try:
+            found = _nominatim(
+                "reverse",
+                {"lat": result["lat"], "lon": result["lon"], "zoom": 10, "format": "jsonv2", "polygon_geojson": 1},
+            )
+            polygon = _as_polygon(found.get("geojson"))
+            if polygon is not None and _normalize(found.get("name")) == wanted_name:
+                return polygon, found
+            print(f"   the area around node {osm_id} is {found.get('display_name')!r}, not {wanted_name!r}")
+        except Exception as e:
+            print(f"   Nominatim reverse geocoding of node {osm_id} failed: {e}")
+
+    return None, None
+
+
+def _contains_own_point(polygon, result):
+    if result.get("lat") is None or result.get("lon") is None:
+        return True
+    return polygon.buffer(0.01).contains(Point(float(result["lon"]), float(result["lat"])))
+
+
+def fetch_boundary(place, osm_relation=None):
+    """
+    Get the (Multi)Polygon of a place from OpenStreetMap.
+
+    The candidates of a Nominatim search whose name matches the first part of
+    `place` (e.g. "Curitiba" for "Curitiba, Parana, Brazil", ignoring case and
+    accents) are tried from the best ranked (administrative area or
+    settlement, then importance); the first one whose polygon can be resolved
+    and contains the candidate's own location is used. With `osm_relation`,
+    that relation is used directly.
+
+    Returns (polygon, metadata of the OSM feature).
+    """
+    if osm_relation:
+        result = {"osm_type": "relation", "osm_id": int(osm_relation)}
+        polygon, source = _polygon_of(result, wanted_name=None)
+        if polygon is None:
+            raise ValueError(f"Could not get the polygon of OSM relation {osm_relation}")
+        return polygon, source
+
+    wanted = _normalize(place.split(",")[0])
+    candidates = _nominatim("search", {"q": place, "format": "jsonv2", "limit": 10, "addressdetails": 1})
+    print(f"🔎 Nominatim candidates for {place!r}:")
+    for candidate in candidates:
+        print(f"   - {_describe(candidate)}")
+
+    matching = [c for c in candidates if _normalize(c.get("name")) == wanted]
+    if not matching:
+        raise ValueError(
+            f"No OpenStreetMap result is named {place.split(',')[0].strip()!r}; candidates: "
+            + "; ".join(_describe(c) for c in candidates)
+            + ". Refine the place or pass --osm-relation."
+        )
+
+    ranked = sorted(matching, key=lambda c: (_is_area(c), float(c.get("importance") or 0)), reverse=True)
+    for candidate in ranked:
+        polygon, source = _polygon_of(candidate, wanted)
+        if polygon is None:
+            continue
+        if not _contains_own_point(polygon, candidate):
+            print(f"   the polygon of {_describe(source)} does not contain {_describe(candidate)}, skipping")
+            continue
+        return polygon, source
+
+    raise ValueError(
+        f"Could not get a polygon for {place!r} from: " + "; ".join(_describe(c) for c in ranked)
+        + ". Pass --osm-relation to choose the boundary explicitly."
+    )
+
+
+def load_or_fetch_boundary(place, city_dir, osm_relation=None):
+    """Reuse data/<slug>/boundary.geojson if it is for this place, otherwise fetch and save it."""
     path = city_dir / "boundary.geojson"
     if path.exists():
         with open(path, encoding="utf-8") as f:
             feature = json.load(f)["features"][0]
+        properties = feature["properties"]
+        same = (
+            str(properties.get("osm_id")) == str(osm_relation) and properties.get("osm_type") == "relation"
+            if osm_relation
+            else properties.get("place") == place
+        )
+        if not same:
+            raise SystemExit(
+                f"❌ {path} is for {properties.get('display_name')!r} (place {properties.get('place')!r}, "
+                f"{properties.get('osm_type')} {properties.get('osm_id')}), not for {place!r}"
+                + (f" / relation {osm_relation}" if osm_relation else "")
+                + f". Delete {city_dir} to start this city over, or use another --slug."
+            )
+        print(f"🗺️  Boundary: {properties.get('display_name')} ({properties.get('osm_type')} {properties.get('osm_id')})")
         return shape(feature["geometry"])
 
-    polygon, result = fetch_boundary(place)
+    polygon, result = fetch_boundary(place, osm_relation)
     city_dir.mkdir(parents=True, exist_ok=True)
     write_json_atomic(
         {
@@ -166,6 +304,10 @@ def load_or_fetch_boundary(place, city_dir):
     )
     print(f"🗺️  Boundary: {result.get('display_name')} ({result.get('osm_type')} {result.get('osm_id')})")
     return polygon
+
+
+def area_km2(polygon):
+    return float(gpd.GeoSeries([polygon], crs="EPSG:4326").to_crs("EPSG:6933").area.iloc[0] / 1e6)
 
 
 # ---------------------------------------------------------------------------
@@ -459,12 +601,15 @@ def load_partial(path, done):
 def run(args, token):
     slug = args.slug or slugify(args.place)
     city_dir = Path(args.data_dir) / slug
-    (city_dir / "tiles").mkdir(parents=True, exist_ok=True)
-    (city_dir / "partial").mkdir(parents=True, exist_ok=True)
     progress_path = city_dir / "progress.json"
 
-    polygon = load_or_fetch_boundary(args.place, city_dir)
+    polygon = load_or_fetch_boundary(args.place, city_dir, args.osm_relation)
     big_tiles = big_tiles_for(polygon, args.big_zoom)
+    if args.boundary_only:
+        print(f"📐 {area_km2(polygon):.1f} km², {len(big_tiles)} big tiles at zoom {args.big_zoom}")
+        return None
+    (city_dir / "tiles").mkdir(parents=True, exist_ok=True)
+    (city_dir / "partial").mkdir(parents=True, exist_ok=True)
     progress = load_progress(progress_path, args.place, slug, args.big_zoom, args.small_zoom, big_tiles)
     save_progress(progress, progress_path)
 
@@ -573,13 +718,15 @@ def main(argv=None):
     parser.add_argument("--workers", type=int, default=8, help="Parallel detection requests (default: 8)")
     parser.add_argument("--data-dir", default=str(REPO_ROOT / "data"), help="Output root (default: data/)")
     parser.add_argument("--slug", default=None, help="Folder name of the city (default: from the place)")
+    parser.add_argument("--osm-relation", type=int, default=None, help="Use this OpenStreetMap relation as the boundary")
+    parser.add_argument("--boundary-only", action="store_true", help="Only resolve and save the boundary, then exit")
     args = parser.parse_args(argv)
 
     if args.small_zoom <= args.big_zoom:
         parser.error("--small-zoom must be larger than --big-zoom")
 
     token = mly.get_mapillary_token()
-    if not token:
+    if not token and not args.boundary_only:
         parser.error("No Mapillary token found: set the API_TOKEN environment variable")
 
     signal.signal(signal.SIGTERM, _request_stop)
