@@ -74,7 +74,13 @@ RATE_LIMIT_FACTOR = 5
 # checkpoint the in-progress big tile at least this often (seconds)
 CHECKPOINT_INTERVAL = 600
 
-COLUMNS = ["id", "captured_at", "lon", "lat", "h", "vegetation_percent", "number_available_classes"]
+COLUMNS = [
+    "id", "captured_at", "lon", "lat", "h", "h_computed",
+    "vegetation_percent", "segmented_percent", "number_available_classes",
+]
+
+# version of the output schema and selection rule, recorded in progress.json
+SCHEMA_VERSION = 2
 
 # replaced in tests
 now = time.monotonic
@@ -424,7 +430,7 @@ def small_tiles_for(big_tile, polygon, zoom):
     return [t for t in mercantile.children(big_tile, zoom=zoom) if prepared.intersects(tile_box(t))]
 
 
-def load_progress(path, place, slug, big_zoom, small_zoom, big_tiles):
+def load_progress(path, place, slug, big_zoom, small_zoom, big_tiles, min_coverage):
     if path.exists():
         with open(path, encoding="utf-8") as f:
             progress = json.load(f)
@@ -433,12 +439,20 @@ def load_progress(path, place, slug, big_zoom, small_zoom, big_tiles):
                 f"❌ {path} was created with big zoom {progress['big_zoom']} and small zoom "
                 f"{progress['small_zoom']}; use the same zooms (or another --data-dir/--slug)."
             )
+        if progress.get("schema_version") != SCHEMA_VERSION or progress.get("min_coverage") != min_coverage:
+            raise SystemExit(
+                f"❌ {path} was created with schema version {progress.get('schema_version', 1)} and "
+                f"--min-coverage {progress.get('min_coverage')}, not {SCHEMA_VERSION} and {min_coverage}: "
+                f"its tiles would not match. Delete {path.parent} to start this city over."
+            )
     else:
         progress = {
             "place": place,
             "slug": slug,
+            "schema_version": SCHEMA_VERSION,
             "big_zoom": big_zoom,
             "small_zoom": small_zoom,
+            "min_coverage": min_coverage,
             "created_at": utc_now(),
             "tiles": {},
         }
@@ -600,25 +614,31 @@ def images_of_tile(tile, token, limit, max_zoom=MAX_SPLIT_ZOOM):
     return own, too_much
 
 
-def image_row(image, detections):
-    """The output row of an image, or None if it has no full-scene segmentation."""
-    values = {d.get("value") for d in detections}
-    if not any(mly.detection_class_group(v) == "surface" for v in values):
+def _float_or_nan(value):
+    return float(value) if value is not None else float("nan")
+
+
+def image_row(image, detections, min_coverage):
+    """
+    The output row of an image, or None if it has no full-scene segmentation,
+    i.e. if its detection polygons cover less than `min_coverage` % of it.
+    """
+    summary = mly.detections_summary(detections)
+    coverage = min(100.0, sum(summary["class_percents"].values()))
+    if coverage < min_coverage:
         return None
 
-    summary = mly.detections_summary(detections)
     location = image.get("computed_geometry") or image["geometry"]
     lon, lat = location["coordinates"][:2]
-    h = image.get("computed_altitude")
-    if h is None:
-        h = image.get("altitude")
     return {
         "id": str(image["id"]),
         "captured_at": image.get("captured_at"),
         "lon": float(lon),
         "lat": float(lat),
-        "h": float(h) if h is not None else float("nan"),
+        "h": _float_or_nan(image.get("altitude")),  # GPS altitude (absolute)
+        "h_computed": _float_or_nan(image.get("computed_altitude")),  # from Mapillary's 3D reconstruction
         "vegetation_percent": float(summary["class_percents"].get(VEGETATION_CLASS, 0.0)),
+        "segmented_percent": round(coverage, 4),
         "number_available_classes": int(summary["number_available_classes"]),
     }
 
@@ -643,7 +663,7 @@ def process_small_tile(tile, polygon, token, args, executor):
 
     rows = []
     for image, detections in zip(images, executor.map(fetch, images)):
-        row = image_row(image, detections)
+        row = image_row(image, detections, args.min_coverage)
         if row:
             row["_small_tile"] = tile_key(tile)
             rows.append(row)
@@ -659,7 +679,7 @@ def rows_to_gdf(rows):
     df = pd.DataFrame(rows, columns=COLUMNS + ["_small_tile"])
     # always millisecond resolution, whether the values come from the API or a checkpoint
     df["captured_at"] = pd.to_datetime(df["captured_at"], unit="ms", utc=True).astype("datetime64[ms, UTC]")
-    for column in ("lon", "lat", "h", "vegetation_percent"):
+    for column in ("lon", "lat", "h", "h_computed", "vegetation_percent", "segmented_percent"):
         df[column] = df[column].astype(float)
     df["number_available_classes"] = df["number_available_classes"].astype("int64")
     df["id"] = df["id"].astype(str)
@@ -706,7 +726,9 @@ def run(args, token):
         return None
     (city_dir / "tiles").mkdir(parents=True, exist_ok=True)
     (city_dir / "partial").mkdir(parents=True, exist_ok=True)
-    progress = load_progress(progress_path, args.place, slug, args.big_zoom, args.small_zoom, big_tiles)
+    progress = load_progress(
+        progress_path, args.place, slug, args.big_zoom, args.small_zoom, big_tiles, args.min_coverage
+    )
     save_progress(progress, progress_path)
 
     started = now()
@@ -785,7 +807,8 @@ def run(args, token):
                 partial_path.unlink(missing_ok=True)
                 save_progress(progress, progress_path)
                 completed_now += 1
-                print(f"✅ {key}: completed, {count} segmented images of {state['images']}", flush=True)
+                share = f" ({100 * count / state['images']:.1f}%)" if state["images"] else ""
+                print(f"✅ {key}: completed, {count} segmented images of {state['images']}{share}", flush=True)
             else:
                 checkpoint(rows, done, state, partial_path, progress, progress_path)
                 reason = "failed small tiles will be retried next run" if failures and not out_of_time() else "checkpointed"
@@ -819,6 +842,10 @@ def main(argv=None):
     parser.add_argument("--max-minutes", type=float, default=None, help="Stop (and checkpoint) after this many minutes")
     parser.add_argument("--max-big-tiles", type=int, default=None, help="Process at most this many big tiles")
     parser.add_argument("--workers", type=int, default=8, help="Parallel detection requests (default: 8)")
+    parser.add_argument(
+        "--min-coverage", type=float, default=80.0,
+        help="Keep images whose segmentation covers at least this %% of the image (default: 80)",
+    )
     parser.add_argument("--data-dir", default=str(REPO_ROOT / "data"), help="Output root (default: data/)")
     parser.add_argument("--slug", default=None, help="Folder name of the city (default: from the place)")
     parser.add_argument("--osm-relation", type=int, default=None, help="Use this OpenStreetMap relation as the boundary")

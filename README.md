@@ -47,8 +47,10 @@ Clone with the submodule: `git clone --recurse-submodules <url>`
    stops.
 4. For each image inside the city, its detections (semantic segmentation) are
    requested, and the vegetation percent is computed straight from the encoded
-   polygons. Images without a full-scene segmentation (e.g. old images that
-   only kept a few sign detections) are dropped.
+   polygons. Only images with a full-scene segmentation are kept: their
+   detection polygons must cover at least 80% of the image (`--min-coverage`).
+   Older images often only kept a few detections (a crosswalk, a pole, a
+   sign), which would read as a misleading 0% vegetation.
 5. Big tiles are processed from the city center outwards (unfinished ones
    first). When all small tiles of a big tile are done, it is written to
    `data/<city_slug>/tiles/<z>_<x>_<y>.parquet`.
@@ -60,8 +62,10 @@ Clone with the submodule: `git clone --recurse-submodules <url>`
 | `id` | Mapillary image ID |
 | `captured_at` | capture time (UTC) |
 | `lon`, `lat` | image location (Mapillary's computed location when available) |
-| `h` | altitude in meters (computed altitude when available, may be empty) |
+| `h` | GPS altitude of the camera in meters (absolute, may be empty) |
+| `h_computed` | altitude from Mapillary's 3D reconstruction (relative, may be empty) |
 | `vegetation_percent` | % of the image covered by `nature--vegetation` |
+| `segmented_percent` | % of the image covered by the segmentation (≥ `--min-coverage`) |
 | `number_available_classes` | number of segmentation classes in the image |
 | `geometry` | point (lon, lat) |
 
@@ -84,12 +88,15 @@ python scripts/fetch_city_vegetation.py "Curitiba, Parana, Brazil" --max-minutes
 
 Options: `--big-zoom` (14), `--small-zoom` (18), `--limit` (2000 images per
 request), `--max-minutes`, `--max-big-tiles`, `--workers` (8 parallel
-detection requests), `--data-dir` (`data`), `--slug`, `--osm-relation` (use
+detection requests), `--min-coverage` (80), `--data-dir` (`data`), `--slug`,
+`--osm-relation` (use
 this OSM relation as the boundary), `--boundary-only` (resolve and save the
 boundary, print its area and number of tiles, then exit; no token needed).
 See `--help`.
 
-To start a city over (e.g. after a wrong boundary), delete `data/<city_slug>/`.
+To start a city over (e.g. after a wrong boundary, or to change
+`--min-coverage`), delete `data/<city_slug>/`; the script refuses to mix tiles
+made with other zooms, coverage threshold or output schema.
 
 ## GitHub Action
 

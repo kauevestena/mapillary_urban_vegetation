@@ -44,15 +44,22 @@ def encoded(*geoms):
     return base64.b64encode(tile).decode()
 
 
+# a full segmentation: sky 25% + vegetation 25% + road 50% = 100% of the image
 VEGETATION_DETECTIONS = [
     {"value": "nature--sky", "geometry": encoded(box(0, 0, EXTENT, EXTENT // 4))},
     {"value": "nature--vegetation", "geometry": encoded(box(0, EXTENT // 4, EXTENT, EXTENT // 2))},
+    {"value": "construction--flat--road", "geometry": encoded(box(0, EXTENT // 2, EXTENT, EXTENT))},
 ]
-SIGN_ONLY_DETECTIONS = [{"value": "regulatory--stop--g1", "geometry": encoded(box(0, 0, 100, 100))}]
+# leftover detections of an old image: a road patch (10%) and a sign. It has a
+# "surface" class, but is not a full segmentation
+PARTIAL_DETECTIONS = [
+    {"value": "construction--flat--road", "geometry": encoded(box(0, 0, EXTENT, EXTENT // 10))},
+    {"value": "regulatory--stop--g1", "geometry": encoded(box(0, 0, 100, 100))},
+]
 
 
 def make_images():
-    """Per small tile: one segmented image, one sign-only image; 5 segmented ones in the dense tile."""
+    """Per small tile: one segmented image, one partially detected one; 5 segmented ones in the dense tile."""
     images = []
     for big in (BIG_A, BIG_B):
         for small in mercantile.children(big, zoom=SMALL_ZOOM):
@@ -179,7 +186,7 @@ class FakeAPI:
             self.calls["detections"].append(url)
             assert params["fields"] == "value,geometry"
             image_id = url.split("/")[-2]
-            return Response({"data": VEGETATION_DETECTIONS if image_id.startswith("veg") else SIGN_ONLY_DETECTIONS})
+            return Response({"data": VEGETATION_DETECTIONS if image_id.startswith("veg") else PARTIAL_DETECTIONS})
         raise AssertionError(f"unexpected url {url}")
 
 
@@ -197,7 +204,7 @@ def make_args(data_dir, **overrides):
     args = dict(
         place="Test City, Somewhere", big_zoom=BIG_ZOOM, small_zoom=SMALL_ZOOM, limit=3,
         max_minutes=None, max_big_tiles=None, workers=4, data_dir=str(data_dir), slug=None,
-        osm_relation=None, boundary_only=False,
+        osm_relation=None, boundary_only=False, min_coverage=80.0,
     )
     args.update(overrides)
     return argparse.Namespace(**args)
@@ -329,12 +336,14 @@ def test_full_run(tmp_path, api):
     assert not list((city_dir / "partial").glob("*.parquet"))
 
     gdf = read_all_tiles(city_dir)
-    assert set(gdf["id"]) == SEGMENTED_IDS  # sign-only images dropped, each image once
+    assert set(gdf["id"]) == SEGMENTED_IDS  # partially detected images dropped, each image once
     assert len(gdf) == len(SEGMENTED_IDS)
     assert list(gdf.columns) == fcv.COLUMNS + ["geometry"]
     assert gdf.crs == "EPSG:4326"
     assert (gdf["vegetation_percent"] == 25.0).all()
-    assert (gdf["h"] == 900.5).all()
+    assert (gdf["h"] == 901.0).all()  # GPS altitude
+    assert (gdf["h_computed"] == 900.5).all()
+    assert (gdf["segmented_percent"] == 100.0).all()
     assert gdf["captured_at"].dt.year.eq(2023).all()
 
     # the dense tile (limit=3 < 5 images) and the refused one were split into deeper tiles
@@ -511,3 +520,34 @@ def test_big_tiles_are_processed_from_the_center(tmp_path, api, monkeypatch):
     monkeypatch.setattr(fcv, "small_tiles_for", lambda big, poly, zoom: started.append(fcv.tile_key(big)) or [])
     fcv.run(make_args(tmp_path), TOKEN)
     assert started[0] == fcv.tile_key(BIG_A)
+
+
+def test_coverage_rule():
+    image = {"id": 1, "geometry": {"type": "Point", "coordinates": [0, 0]}, "altitude": None, "captured_at": 0}
+    assert fcv.image_row(image, PARTIAL_DETECTIONS, 80) is None
+    row = fcv.image_row(image, PARTIAL_DETECTIONS, 5)
+    assert row["segmented_percent"] == pytest.approx(100 * (409 + 100 * 100 / 4096) / 4096, abs=1e-3)
+    assert row["vegetation_percent"] == 0.0
+    assert row["h"] != row["h"]  # NaN when the altitude is missing
+    # overlapping polygons never count more than the whole image
+    doubled = VEGETATION_DETECTIONS + VEGETATION_DETECTIONS
+    assert fcv.image_row(image, doubled, 80)["segmented_percent"] == 100.0
+
+
+def test_lower_min_coverage_keeps_partial_images(tmp_path, api):
+    fcv.run(make_args(tmp_path, min_coverage=5.0), TOKEN)
+    ids = set(read_all_tiles(tmp_path / "test-city-somewhere")["id"])
+    assert ids == {i["id"] for i in IMAGES}
+
+
+def test_progress_of_another_schema_or_coverage_is_refused(tmp_path, api):
+    fcv.run(make_args(tmp_path, max_big_tiles=1), TOKEN)
+    with pytest.raises(SystemExit, match="Delete"):
+        fcv.run(make_args(tmp_path, min_coverage=50.0), TOKEN)
+
+    progress_path = tmp_path / "test-city-somewhere" / "progress.json"
+    progress = json.loads(progress_path.read_text())
+    del progress["schema_version"]  # a progress file of the first version
+    progress_path.write_text(json.dumps(progress))
+    with pytest.raises(SystemExit, match="schema version 1"):
+        fcv.run(make_args(tmp_path), TOKEN)
