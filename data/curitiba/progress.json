@@ -378,11 +378,12 @@
       "images_segmented": 0
     },
     "14_5948_9391": {
-      "status": "not_started",
-      "small_tiles_total": null,
+      "status": "completed",
+      "small_tiles_total": 256,
       "small_tiles_done": [],
-      "images": 0,
-      "images_segmented": 0
+      "images": 56504,
+      "images_segmented": 13737,
+      "completed_at": "2026-09-28T16:32:43Z"
     },
     "14_5948_9392": {
       "status": "not_started",
@@ -819,12 +820,12 @@
       "images_segmented": 0
     }
   },
-  "updated_at": "2026-09-28T16:02:33Z",
+  "updated_at": "2026-09-28T16:32:43Z",
   "summary": {
     "big_tiles": 116,
-    "completed": 1,
+    "completed": 2,
     "in_progress": 0,
-    "not_started": 115,
-    "images_segmented": 0
+    "not_started": 114,
+    "images_segmented": 13737
   }
 }
