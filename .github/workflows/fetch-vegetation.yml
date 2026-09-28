@@ -1,0 +1,76 @@
+name: Fetch city vegetation
+
+on:
+  # Keep filling the data gradually
+  schedule:
+    - cron: '0 */6 * * *'  # every 6 hours
+
+  # Manual runs, e.g. for another city
+  workflow_dispatch:
+    inputs:
+      place:
+        description: Place to query on OpenStreetMap
+        default: 'Curitiba, Parana, Brazil'
+      big_zoom:
+        description: Zoom of the output tiles
+        default: '14'
+      small_zoom:
+        description: Zoom of the query tiles
+        default: '18'
+      max_minutes:
+        description: Time budget of the run (minutes)
+        default: '320'
+
+# never run two fetches at the same time (they would race on data/)
+concurrency:
+  group: fetch-vegetation
+  cancel-in-progress: false
+
+permissions:
+  contents: write  # commit the fetched data
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        submodules: true
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Fetch vegetation data
+      env:
+        API_TOKEN: ${{ secrets.API_TOKEN }}
+        PLACE: ${{ github.event.inputs.place || 'Curitiba, Parana, Brazil' }}
+        BIG_ZOOM: ${{ github.event.inputs.big_zoom || '14' }}
+        SMALL_ZOOM: ${{ github.event.inputs.small_zoom || '18' }}
+        MAX_MINUTES: ${{ github.event.inputs.max_minutes || '320' }}
+      run: |
+        python scripts/fetch_city_vegetation.py "$PLACE" \
+          --big-zoom "$BIG_ZOOM" --small-zoom "$SMALL_ZOOM" --max-minutes "$MAX_MINUTES"
+
+    - name: Commit data
+      if: always()
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git add data/
+        if git diff --cached --quiet; then
+          echo "No new data"
+          exit 0
+        fi
+        git commit -m "🤖 Update vegetation data [skip ci]"
+        git pull --rebase origin "${GITHUB_REF_NAME}"
+        git push origin "HEAD:${GITHUB_REF_NAME}"

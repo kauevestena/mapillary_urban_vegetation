@@ -1,0 +1,11 @@
+geopandas
+shapely
+mercantile
+requests
+tqdm
+pandas
+numpy
+pillow
+mapbox-vector-tile>=2.0
+wget
+pyarrow

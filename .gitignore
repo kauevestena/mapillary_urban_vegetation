@@ -216,3 +216,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# temporary files of scripts/fetch_city_vegetation.py (atomic writes)
+*.tmp

@@ -1,0 +1,281 @@
+"""
+Offline tests of scripts/fetch_city_vegetation.py against fake Nominatim and
+Mapillary APIs (no network, no token needed).
+"""
+
+import argparse
+import base64
+import json
+import sys
+from pathlib import Path
+
+import geopandas as gpd
+import mapbox_vector_tile
+import mercantile
+import pandas as pd
+import pytest
+import requests
+from shapely.geometry import MultiPolygon, box, mapping
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+
+import fetch_city_vegetation as fcv  # noqa: E402
+
+TOKEN = "MLY|123|secret"
+EXTENT = 4096
+BIG_ZOOM, SMALL_ZOOM = 16, 18
+BIG_A = mercantile.tile(-49.27, -25.43, BIG_ZOOM)
+BIG_B = mercantile.Tile(BIG_A.x + 1, BIG_A.y, BIG_ZOOM)
+INSET = 1e-7  # keep the polygon strictly inside the two big tiles
+POLYGON = MultiPolygon([fcv.tile_box(t).buffer(-INSET) for t in (BIG_A, BIG_B)])
+
+DENSE_TILE = next(iter(mercantile.children(BIG_A, zoom=SMALL_ZOOM)))  # more images than --limit
+REFUSED_TILE = list(mercantile.children(BIG_B, zoom=SMALL_ZOOM))[5]  # "reduce the amount of data"
+
+
+# --- fake world ---------------------------------------------------------------
+
+def encoded(*geoms):
+    tile = mapbox_vector_tile.encode(
+        [{"name": "mpy-or", "features": [{"geometry": g.wkt, "properties": {}} for g in geoms]}],
+        default_options={"y_coord_down": True, "extents": EXTENT},
+    )
+    return base64.b64encode(tile).decode()
+
+
+VEGETATION_DETECTIONS = [
+    {"value": "nature--sky", "geometry": encoded(box(0, 0, EXTENT, EXTENT // 4))},
+    {"value": "nature--vegetation", "geometry": encoded(box(0, EXTENT // 4, EXTENT, EXTENT // 2))},
+]
+SIGN_ONLY_DETECTIONS = [{"value": "regulatory--stop--g1", "geometry": encoded(box(0, 0, 100, 100))}]
+
+
+def make_images():
+    """Per small tile: one segmented image, one sign-only image; 5 segmented ones in the dense tile."""
+    images = []
+    for big in (BIG_A, BIG_B):
+        for small in mercantile.children(big, zoom=SMALL_ZOOM):
+            b = mercantile.bounds(small)
+            count = 5 if small == DENSE_TILE else 2
+            for n in range(count):
+                lon = b.west + (b.east - b.west) * (n + 1) / (count + 1)
+                lat = b.south + (b.north - b.south) * (n + 1) / (count + 1)
+                kind = "sign" if (n == 1 and small != DENSE_TILE) else "veg"
+                images.append({
+                    "id": f"{kind}-{fcv.tile_key(small)}-{n}",
+                    "geometry": {"type": "Point", "coordinates": [lon, lat]},
+                    "computed_geometry": {"type": "Point", "coordinates": [lon + 1e-9, lat]},
+                    "computed_altitude": 900.5,
+                    "altitude": 901.0,
+                    "captured_at": 1700000000000 + n,
+                })
+    return images
+
+
+IMAGES = make_images()
+SEGMENTED_IDS = {i["id"] for i in IMAGES if i["id"].startswith("veg")}
+
+
+class Response:
+    def __init__(self, payload, status_code=200):
+        self.payload, self.status_code = payload, status_code
+
+    def json(self):
+        return self.payload
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise requests.exceptions.HTTPError(
+                f"{self.status_code} Error for url: x?access_token={TOKEN}", response=self
+            )
+
+
+class FakeAPI:
+    def __init__(self):
+        self.calls = {"nominatim": 0, "images": [], "detections": []}
+
+    def __call__(self, url, params=None, timeout=None, headers=None):
+        if url.startswith(fcv.NOMINATIM_URL):
+            self.calls["nominatim"] += 1
+            assert headers and "User-Agent" in headers
+            return Response([
+                {"category": "place", "type": "city", "importance": 0.9,
+                 "geojson": mapping(box(-50, -26, -49, -25))},
+                {"category": "boundary", "type": "administrative", "importance": 0.5,
+                 "display_name": "Test City", "osm_type": "relation", "osm_id": 42,
+                 "geojson": mapping(POLYGON)},
+            ])
+        if url.endswith("/images"):
+            self.calls["images"].append(params)
+            assert params["access_token"] == TOKEN
+            west, south, east, north = map(float, params["bbox"].split(","))
+            assert west < east and south < north
+            requested = mercantile.tile((west + east) / 2, (south + north) / 2, 18)
+            if requested == REFUSED_TILE and (east - west) > 0.0009:
+                return Response({"error": {"message": "Please reduce the amount of data you're asking for, then retry your request"}}, 500)
+            found = [
+                i for i in IMAGES
+                if west <= i["geometry"]["coordinates"][0] <= east and south <= i["geometry"]["coordinates"][1] <= north
+            ]
+            return Response({"data": found[: int(params["limit"])]})
+        if url.endswith("/detections"):
+            self.calls["detections"].append(url)
+            assert params["fields"] == "value,geometry"
+            image_id = url.split("/")[-2]
+            return Response({"data": VEGETATION_DETECTIONS if image_id.startswith("veg") else SIGN_ONLY_DETECTIONS})
+        raise AssertionError(f"unexpected url {url}")
+
+
+@pytest.fixture
+def api(monkeypatch):
+    fake = FakeAPI()
+    monkeypatch.setattr(requests, "get", fake)
+    monkeypatch.setattr(fcv, "sleep", lambda s: None)
+    monkeypatch.setattr(fcv, "STOP_REQUESTED", False)
+    return fake
+
+
+def make_args(data_dir, **overrides):
+    args = dict(
+        place="Test City, Somewhere", big_zoom=BIG_ZOOM, small_zoom=SMALL_ZOOM, limit=3,
+        max_minutes=None, max_big_tiles=None, workers=4, data_dir=str(data_dir), slug=None,
+    )
+    args.update(overrides)
+    return argparse.Namespace(**args)
+
+
+def read_all_tiles(city_dir):
+    frames = [gpd.read_parquet(p) for p in sorted((city_dir / "tiles").glob("*.parquet"))]
+    return pd.concat(frames, ignore_index=True)
+
+
+# --- tests --------------------------------------------------------------------
+
+def test_slugify():
+    assert fcv.slugify("Curitiba, Paraná, Brazil") == "curitiba-parana-brazil"
+
+
+def test_boundary_prefers_administrative_and_is_reused(tmp_path, api):
+    city_dir = tmp_path / "city"
+    polygon = fcv.load_or_fetch_boundary("Test City", city_dir)
+    assert polygon.equals(POLYGON)
+    again = fcv.load_or_fetch_boundary("Test City", city_dir)
+    assert again.equals(POLYGON) and api.calls["nominatim"] == 1
+    properties = json.loads((city_dir / "boundary.geojson").read_text())["features"][0]["properties"]
+    assert properties["osm_id"] == 42 and properties["place"] == "Test City"
+
+
+def test_tiling():
+    assert set(fcv.big_tiles_for(POLYGON, BIG_ZOOM)) == {BIG_A, BIG_B}
+    small = fcv.small_tiles_for(BIG_A, POLYGON, SMALL_ZOOM)
+    assert len(small) == 16 and all(t.z == SMALL_ZOOM for t in small)
+
+
+def test_full_run(tmp_path, api):
+    progress = fcv.run(make_args(tmp_path), TOKEN)
+    city_dir = tmp_path / "test-city-somewhere"
+
+    assert {k: v["status"] for k, v in progress["tiles"].items()} == {
+        fcv.tile_key(BIG_A): "completed", fcv.tile_key(BIG_B): "completed"
+    }
+    assert progress["summary"]["images_segmented"] == len(SEGMENTED_IDS)
+    assert not list((city_dir / "partial").glob("*.parquet"))
+
+    gdf = read_all_tiles(city_dir)
+    assert set(gdf["id"]) == SEGMENTED_IDS  # sign-only images dropped, each image once
+    assert len(gdf) == len(SEGMENTED_IDS)
+    assert list(gdf.columns) == fcv.COLUMNS + ["geometry"]
+    assert gdf.crs == "EPSG:4326"
+    assert (gdf["vegetation_percent"] == 25.0).all()
+    assert (gdf["h"] == 900.5).all()
+    assert gdf["captured_at"].dt.year.eq(2023).all()
+
+    # the dense tile (limit=3 < 5 images) and the refused one were split into deeper tiles
+    widths = sorted({round(float(p["bbox"].split(",")[2]) - float(p["bbox"].split(",")[0]), 7) for p in api.calls["images"]})
+    zoom18 = round(mercantile.bounds(DENSE_TILE).east - mercantile.bounds(DENSE_TILE).west, 7)
+    assert widths[-1] == zoom18 and len(widths) >= 2
+    refused_requests = [p for p in api.calls["images"] if mercantile.tile(
+        *[(a + b) / 2 for a, b in zip(map(float, p["bbox"].split(",")[:2]), map(float, p["bbox"].split(",")[2:]))], 18
+    ) == REFUSED_TILE]
+    assert len(refused_requests) == 1 + 4  # refused once (not retried), then its 4 children
+
+    # only images inside the city got a detections request, once each
+    assert len(api.calls["detections"]) == len(IMAGES)
+
+    # the token never reaches the outputs
+    for path in city_dir.rglob("*"):
+        if path.is_file():
+            assert b"secret" not in path.read_bytes()
+
+
+def test_resume_gives_the_same_result(tmp_path, api, monkeypatch):
+    reference_dir = tmp_path / "reference"
+    fcv.run(make_args(reference_dir), TOKEN)
+    reference = read_all_tiles(reference_dir / "test-city-somewhere").sort_values("id", ignore_index=True)
+
+    # stop after 20 small tiles (in the middle of the second big tile)
+    original = fcv.process_small_tile
+    calls = {"n": 0}
+
+    def counting(*args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 20:
+            monkeypatch.setattr(fcv, "STOP_REQUESTED", True)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(fcv, "process_small_tile", counting)
+    progress = fcv.run(make_args(tmp_path / "resumed"), TOKEN)
+    city_dir = tmp_path / "resumed" / "test-city-somewhere"
+    second = progress["tiles"][fcv.tile_key(BIG_B)]
+    assert progress["tiles"][fcv.tile_key(BIG_A)]["status"] == "completed"
+    assert second["status"] == "in_progress" and len(second["small_tiles_done"]) == 4
+    assert (city_dir / "partial" / f"{fcv.tile_key(BIG_B)}.parquet").exists()
+
+    monkeypatch.setattr(fcv, "STOP_REQUESTED", False)
+    monkeypatch.setattr(fcv, "process_small_tile", original)
+    api.calls["detections"].clear()
+    progress = fcv.run(make_args(tmp_path / "resumed"), TOKEN)
+    assert progress["summary"]["completed"] == 2
+    assert len(api.calls["detections"]) == 2 * 12  # only the 12 remaining small tiles were fetched
+
+    resumed = read_all_tiles(city_dir).sort_values("id", ignore_index=True)
+    pd.testing.assert_frame_equal(resumed, reference)
+
+
+def test_time_budget(tmp_path, api, monkeypatch):
+    clock = {"t": 0.0}
+
+    def fake_now():
+        clock["t"] += 10  # every clock read advances 10 seconds
+        return clock["t"]
+
+    monkeypatch.setattr(fcv, "now", fake_now)
+    progress = fcv.run(make_args(tmp_path, max_minutes=1), TOKEN)
+    assert progress["summary"]["completed"] == 0
+    assert progress["summary"]["in_progress"] == 1
+
+
+def test_failed_small_tile_is_retried_next_run(tmp_path, api, monkeypatch):
+    failing = next(iter(mercantile.children(BIG_B, zoom=SMALL_ZOOM)))
+    real = fcv.process_small_tile
+
+    def flaky(tile, *args, **kwargs):
+        if tile == failing:
+            raise requests.exceptions.RequestException(f"boom access_token={TOKEN}")
+        return real(tile, *args, **kwargs)
+
+    monkeypatch.setattr(fcv, "process_small_tile", flaky)
+    progress = fcv.run(make_args(tmp_path), TOKEN)
+    state = progress["tiles"][fcv.tile_key(BIG_B)]
+    assert state["status"] == "in_progress" and len(state["small_tiles_done"]) == 15
+
+    monkeypatch.setattr(fcv, "process_small_tile", real)
+    progress = fcv.run(make_args(tmp_path), TOKEN)
+    assert progress["summary"]["completed"] == 2
+    assert set(read_all_tiles(tmp_path / "test-city-somewhere")["id"]) == SEGMENTED_IDS
+
+
+def test_zoom_mismatch_is_refused(tmp_path, api):
+    fcv.run(make_args(tmp_path, max_big_tiles=1), TOKEN)
+    with pytest.raises(SystemExit):
+        fcv.run(make_args(tmp_path, small_zoom=17), TOKEN)
