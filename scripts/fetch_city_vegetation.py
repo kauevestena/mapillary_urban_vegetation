@@ -49,6 +49,7 @@ import mapillary_api as mly  # noqa: E402
 
 NOMINATIM_URL = "https://nominatim.openstreetmap.org"
 POLYGONS_OSM_FR_URL = "https://polygons.openstreetmap.fr/get_geojson.py"
+OVERPASS_URL = "https://overpass-api.de/api/interpreter"
 SETTLEMENT_TYPES = {"city", "town", "village", "municipality"}
 USER_AGENT = "mapillary_urban_vegetation (https://github.com/kauevestena/mapillary_urban_vegetation)"
 
@@ -154,26 +155,18 @@ def _is_area(result):
     return (category == "boundary" and kind == "administrative") or (category == "place" and kind in SETTLEMENT_TYPES)
 
 
-def _polygon_of(result, wanted_name):
-    """
-    The polygon of a Nominatim result: its own (lookup) polygon for relations
-    and ways, polygons.openstreetmap.fr for relations as a fallback, and the
-    enclosing municipality (reverse geocoding) for nodes, such as place=city.
-    Returns (polygon, source result) or (None, None).
-    """
-    osm_type, osm_id = result.get("osm_type"), result.get("osm_id")
-
-    if osm_type in ("relation", "way"):
-        try:
-            found = _nominatim(
-                "lookup", {"osm_ids": f"{osm_type[0].upper()}{osm_id}", "format": "jsonv2", "polygon_geojson": 1}
-            )
-            for item in found:
-                polygon = _as_polygon(item.get("geojson"))
-                if polygon is not None:
-                    return polygon, {**result, **item}
-        except Exception as e:
-            print(f"   Nominatim lookup of {osm_type} {osm_id} failed: {e}")
+def _relation_or_way_polygon(osm_type, osm_id, result):
+    """Polygon of a relation or way: Nominatim lookup, then polygons.openstreetmap.fr (relations)."""
+    try:
+        found = _nominatim(
+            "lookup", {"osm_ids": f"{osm_type[0].upper()}{osm_id}", "format": "jsonv2", "polygon_geojson": 1}
+        )
+        for item in found:
+            polygon = _as_polygon(item.get("geojson"))
+            if polygon is not None:
+                return polygon, {**result, **item}
+    except Exception as e:
+        print(f"   Nominatim lookup of {osm_type} {osm_id} failed: {e}")
 
     if osm_type == "relation":
         try:
@@ -183,22 +176,73 @@ def _polygon_of(result, wanted_name):
             response.raise_for_status()
             polygon = _as_polygon(response.json())
             if polygon is not None:
-                return polygon, result
+                return polygon, {**result, "osm_type": "relation", "osm_id": osm_id}
         except Exception as e:
             print(f"   polygons.openstreetmap.fr for relation {osm_id} failed: {e}")
 
-    if osm_type == "node" and result.get("lat") is not None:
+    return None, None
+
+
+def _enclosing_boundaries(lat, lon):
+    """Administrative relations containing a point (Overpass API), as [{'id', 'name', 'admin_level'}]."""
+    query = f"[out:json][timeout:90];is_in({lat},{lon})->.a;rel(pivot.a)[boundary=administrative];out tags;"
+    response = requests.post(OVERPASS_URL, data={"data": query}, headers={"User-Agent": USER_AGENT}, timeout=120)
+    response.raise_for_status()
+    boundaries = []
+    for element in response.json().get("elements", []):
+        tags = element.get("tags", {})
         try:
-            found = _nominatim(
-                "reverse",
-                {"lat": result["lat"], "lon": result["lon"], "zoom": 10, "format": "jsonv2", "polygon_geojson": 1},
-            )
-            polygon = _as_polygon(found.get("geojson"))
-            if polygon is not None and _normalize(found.get("name")) == wanted_name:
-                return polygon, found
-            print(f"   the area around node {osm_id} is {found.get('display_name')!r}, not {wanted_name!r}")
-        except Exception as e:
-            print(f"   Nominatim reverse geocoding of node {osm_id} failed: {e}")
+            level = int(tags.get("admin_level", 0))
+        except ValueError:
+            level = 0
+        boundaries.append({"id": element["id"], "name": tags.get("name"), "admin_level": level})
+    return boundaries
+
+
+def _polygon_of(result, wanted_name):
+    """
+    The polygon of a Nominatim result. Relations and ways: their own polygon.
+    Nodes (e.g. place=city): the administrative boundary with the same name
+    that contains the node (the most local one if several), found with the
+    Overpass API, then Nominatim reverse geocoding as a fallback.
+    Returns (polygon, source result) or (None, None).
+    """
+    osm_type, osm_id = result.get("osm_type"), result.get("osm_id")
+
+    if osm_type in ("relation", "way"):
+        return _relation_or_way_polygon(osm_type, osm_id, result)
+
+    if osm_type != "node" or result.get("lat") is None:
+        return None, None
+
+    try:
+        boundaries = _enclosing_boundaries(result["lat"], result["lon"])
+        same_name = [b for b in boundaries if _normalize(b["name"]) == wanted_name]
+        print(
+            f"   boundaries around node {osm_id}: "
+            + (", ".join(f"{b['name']} (relation {b['id']}, level {b['admin_level']})" for b in boundaries) or "none")
+        )
+        for boundary in sorted(same_name, key=lambda b: b["admin_level"], reverse=True):
+            polygon, source = _relation_or_way_polygon("relation", boundary["id"], {"name": boundary["name"]})
+            if polygon is not None:
+                return polygon, source
+    except Exception as e:
+        print(f"   Overpass query around node {osm_id} failed: {e}")
+
+    try:
+        found = _nominatim(
+            "reverse",
+            {"lat": result["lat"], "lon": result["lon"], "zoom": 10, "format": "jsonv2", "polygon_geojson": 1},
+        )
+        polygon = _as_polygon(found.get("geojson"))
+        if polygon is None:
+            print(f"   reverse geocoding of node {osm_id} gave no polygon ({_describe(found)})")
+        elif _normalize(found.get("name")) != wanted_name:
+            print(f"   reverse geocoding of node {osm_id} gave another area: {_describe(found)}")
+        else:
+            return polygon, found
+    except Exception as e:
+        print(f"   Nominatim reverse geocoding of node {osm_id} failed: {e}")
 
     return None, None
 

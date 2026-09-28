@@ -121,6 +121,19 @@ class FakeAPI:
         self.lookup = {"R42": [{**CITY_RELATION, "geojson": mapping(POLYGON)}]}
         self.reverse = {**CITY_RELATION, "geojson": mapping(POLYGON)}
         self.osmfr = None  # polygons.openstreetmap.fr answer (None: HTTP 500)
+        # Overpass: administrative relations around a point
+        self.overpass = [
+            {"type": "relation", "id": 5, "tags": {"name": "Região Metropolitana de Test City", "admin_level": "6"}},
+            {"type": "relation", "id": 42, "tags": {"name": "Test City", "admin_level": "8"}},
+            {"type": "relation", "id": 1, "tags": {"name": "Somewhere", "admin_level": "2"}},
+        ]
+
+    def post(self, url, data=None, timeout=None, headers=None):
+        assert url == fcv.OVERPASS_URL and "is_in(" in data["data"]
+        self.calls["nominatim"].append("overpass")
+        if self.overpass is None:
+            return Response("error", 504)
+        return Response({"elements": self.overpass})
 
     def __call__(self, url, params=None, timeout=None, headers=None):
         if url.startswith(fcv.NOMINATIM_URL):
@@ -163,6 +176,7 @@ class FakeAPI:
 def api(monkeypatch):
     fake = FakeAPI()
     monkeypatch.setattr(requests, "get", fake)
+    monkeypatch.setattr(requests, "post", fake.post)
     monkeypatch.setattr(fcv, "sleep", lambda s: None)
     monkeypatch.setattr(fcv, "STOP_REQUESTED", False)
     return fake
@@ -207,14 +221,29 @@ def test_boundary_name_matching_ignores_accents_and_case(api):
     assert polygon.equals(POLYGON) and source["osm_id"] == 42
 
 
-def test_boundary_of_a_city_node_comes_from_reverse_geocoding(api):
-    node = {**CITY_RELATION, "osm_type": "node", "osm_id": 7, "category": "place", "type": "city"}
-    api.search_results = [OTHER_AREA, node]
+CITY_NODE = {**CITY_RELATION, "osm_type": "node", "osm_id": 7, "category": "place", "type": "city"}
+
+
+def test_boundary_of_a_city_node_comes_from_the_enclosing_relation(api):
+    # what Nominatim really returned for "Curitiba": the place=city node and Canindé's relation
+    api.search_results = [CITY_NODE, OTHER_AREA]
     polygon, source = fcv.fetch_boundary("Test City")
     assert polygon.equals(POLYGON) and source["osm_id"] == 42
-    assert api.calls["nominatim"] == ["search", "reverse"]
+    assert api.calls["nominatim"] == ["search", "overpass", "lookup"]
 
-    # a reverse result with another name is refused
+
+def test_boundary_of_a_city_node_falls_back_to_reverse_geocoding(api):
+    api.search_results = [CITY_NODE]
+    api.overpass = None  # Overpass down
+    polygon, source = fcv.fetch_boundary("Test City")
+    assert polygon.equals(POLYGON) and api.calls["nominatim"] == ["search", "overpass", "reverse"]
+
+    # a reverse result that is just the node again (as in the real run) is refused
+    api.reverse = {**CITY_NODE, "geojson": {"type": "Point", "coordinates": [CENTER.x, CENTER.y]}}
+    with pytest.raises(ValueError, match="Could not get a polygon"):
+        fcv.fetch_boundary("Test City")
+
+    # and so is one with another name
     api.reverse = {**OTHER_AREA}
     with pytest.raises(ValueError, match="Could not get a polygon"):
         fcv.fetch_boundary("Test City")
