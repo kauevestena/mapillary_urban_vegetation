@@ -49,7 +49,12 @@ import mapillary_api as mly  # noqa: E402
 
 NOMINATIM_URL = "https://nominatim.openstreetmap.org"
 POLYGONS_OSM_FR_URL = "https://polygons.openstreetmap.fr/get_geojson.py"
-OVERPASS_URL = "https://overpass-api.de/api/interpreter"
+# public Overpass API instances, tried in order
+OVERPASS_URLS = [
+    "https://overpass-api.de/api/interpreter",
+    "https://overpass.kumi.systems/api/interpreter",
+    "https://overpass.private.coffee/api/interpreter",
+]
 SETTLEMENT_TYPES = {"city", "town", "village", "municipality"}
 USER_AGENT = "mapillary_urban_vegetation (https://github.com/kauevestena/mapillary_urban_vegetation)"
 
@@ -183,13 +188,40 @@ def _relation_or_way_polygon(osm_type, osm_id, result):
     return None, None
 
 
+def _address_boundaries(osm_type, osm_id):
+    """
+    Administrative relations in the address hierarchy of a feature (Nominatim
+    details), as [{'id', 'name', 'admin_level'}].
+    """
+    details = _nominatim(
+        "details", {"osmtype": osm_type[0].upper(), "osmid": osm_id, "addressdetails": 1, "format": "json"}
+    )
+    boundaries = []
+    for line in details.get("address") or []:
+        if line.get("osm_type") == "R" and line.get("class") == "boundary" and line.get("type") == "administrative":
+            boundaries.append(
+                {"id": line["osm_id"], "name": line.get("localname"), "admin_level": int(line.get("admin_level") or 0)}
+            )
+    return boundaries
+
+
 def _enclosing_boundaries(lat, lon):
     """Administrative relations containing a point (Overpass API), as [{'id', 'name', 'admin_level'}]."""
     query = f"[out:json][timeout:90];is_in({lat},{lon})->.a;rel(pivot.a)[boundary=administrative];out tags;"
-    response = requests.post(OVERPASS_URL, data={"data": query}, headers={"User-Agent": USER_AGENT}, timeout=120)
-    response.raise_for_status()
+    errors = []
+    for url in OVERPASS_URLS:
+        try:
+            response = requests.post(url, data={"data": query}, headers={"User-Agent": USER_AGENT}, timeout=120)
+            response.raise_for_status()
+            elements = response.json().get("elements", [])
+            break
+        except Exception as e:
+            errors.append(f"{url}: {e}")
+    else:
+        raise RuntimeError("; ".join(errors))
+
     boundaries = []
-    for element in response.json().get("elements", []):
+    for element in elements:
         tags = element.get("tags", {})
         try:
             level = int(tags.get("admin_level", 0))
@@ -199,12 +231,27 @@ def _enclosing_boundaries(lat, lon):
     return boundaries
 
 
+def _same_name_boundary_polygon(boundaries, wanted_name, where):
+    """Polygon of the most local boundary named `wanted_name` among `boundaries`."""
+    print(
+        f"   boundaries around {where}: "
+        + (", ".join(f"{b['name']} (relation {b['id']}, level {b['admin_level']})" for b in boundaries) or "none")
+    )
+    same_name = [b for b in boundaries if _normalize(b["name"]) == wanted_name]
+    for boundary in sorted(same_name, key=lambda b: b["admin_level"], reverse=True):
+        polygon, source = _relation_or_way_polygon("relation", boundary["id"], {"name": boundary["name"]})
+        if polygon is not None:
+            return polygon, source
+    return None, None
+
+
 def _polygon_of(result, wanted_name):
     """
     The polygon of a Nominatim result. Relations and ways: their own polygon.
     Nodes (e.g. place=city): the administrative boundary with the same name
-    that contains the node (the most local one if several), found with the
-    Overpass API, then Nominatim reverse geocoding as a fallback.
+    in the node's address hierarchy (Nominatim details) or containing it
+    (Overpass API), the most local one if several; Nominatim reverse
+    geocoding as a last resort.
     Returns (polygon, source result) or (None, None).
     """
     osm_type, osm_id = result.get("osm_type"), result.get("osm_id")
@@ -215,19 +262,19 @@ def _polygon_of(result, wanted_name):
     if osm_type != "node" or result.get("lat") is None:
         return None, None
 
-    try:
-        boundaries = _enclosing_boundaries(result["lat"], result["lon"])
-        same_name = [b for b in boundaries if _normalize(b["name"]) == wanted_name]
-        print(
-            f"   boundaries around node {osm_id}: "
-            + (", ".join(f"{b['name']} (relation {b['id']}, level {b['admin_level']})" for b in boundaries) or "none")
-        )
-        for boundary in sorted(same_name, key=lambda b: b["admin_level"], reverse=True):
-            polygon, source = _relation_or_way_polygon("relation", boundary["id"], {"name": boundary["name"]})
+    # the boundary relations of the node's address (Nominatim), then the ones
+    # containing its location (Overpass)
+    lookups = (
+        ("Nominatim details", lambda: _address_boundaries(osm_type, osm_id)),
+        ("Overpass", lambda: _enclosing_boundaries(result["lat"], result["lon"])),
+    )
+    for name, find in lookups:
+        try:
+            polygon, source = _same_name_boundary_polygon(find(), wanted_name, f"node {osm_id} ({name})")
             if polygon is not None:
                 return polygon, source
-    except Exception as e:
-        print(f"   Overpass query around node {osm_id} failed: {e}")
+        except Exception as e:
+            print(f"   {name} query for node {osm_id} failed: {e}")
 
     try:
         found = _nominatim(

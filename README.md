@@ -30,8 +30,9 @@ Clone with the submodule: `git clone --recurse-submodules <url>`
    administrative areas and settlements, then the most important one. Its
    polygon comes from Nominatim (lookup) or polygons.openstreetmap.fr. When
    OpenStreetMap only has a point for the city (as for Curitiba), the
-   administrative boundary with the same name containing that point is found
-   with the Overpass API. The polygon must contain the city's own location. The candidates are printed in the log; use
+   administrative boundary with the same name is taken from the point's
+   address hierarchy (Nominatim details), or from the boundaries containing
+   it (Overpass API, several public instances). The polygon must contain the city's own location. The candidates are printed in the log; use
    `--osm-relation <id>` to choose the boundary explicitly.
 2. The polygon is covered with **big tiles** (zoom 14, ~2.4 km) and each big
    tile with **small tiles** (zoom 18, ~150 m).
