@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>__TITLE__ · Urban vegetation</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@5/dist/maplibre-gl.css">
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+  <div id="map" role="region" aria-label="Map of vegetation seen in Mapillary images"></div>
+
+  <section id="info" class="panel">
+    <button class="toggle-info" type="button" aria-expanded="true">Hide</button>
+    <div class="muted"><a href="../">← All cities</a></div>
+    <h1 id="city-name"></h1>
+    <div id="city-full-name" class="muted"></div>
+    <div class="details">
+      <dl id="stats"></dl>
+      <div id="legend" class="legend"></div>
+      <p class="muted">Each dot is a Mapillary image with a full semantic segmentation; its color is the
+        share of the image classified as vegetation. Click a dot to open the image.</p>
+    </div>
+  </section>
+
+  <div id="basemaps" class="panel" role="group" aria-label="Basemap"></div>
+
+  <script type="application/json" id="config">__CONFIG__</script>
+  <script src="https://cdn.jsdelivr.net/npm/maplibre-gl@5/dist/maplibre-gl.js"></script>
+  <script src="../assets/map.js"></script>
+  <script>initCityMap(JSON.parse(document.getElementById("config").textContent));</script>
+</body>
+</html>

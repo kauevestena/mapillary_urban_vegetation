@@ -204,7 +204,7 @@ def make_args(data_dir, **overrides):
     args = dict(
         place="Test City, Somewhere", big_zoom=BIG_ZOOM, small_zoom=SMALL_ZOOM, limit=3,
         max_minutes=None, max_big_tiles=None, workers=4, data_dir=str(data_dir), slug=None,
-        osm_relation=None, boundary_only=False, min_coverage=80.0,
+        osm_relation=None, boundary_only=False, min_coverage=80.0, point=None,
     )
     args.update(overrides)
     return argparse.Namespace(**args)
@@ -551,3 +551,38 @@ def test_progress_of_another_schema_or_coverage_is_refused(tmp_path, api):
     progress_path.write_text(json.dumps(progress))
     with pytest.raises(SystemExit, match="schema version 1"):
         fcv.run(make_args(tmp_path), TOKEN)
+
+
+def test_point_runs_only_its_big_tile(tmp_path, api):
+    b = mercantile.bounds(BIG_B)
+    point = ((b.south + b.north) / 2, (b.west + b.east) / 2)  # (lat, lon)
+    progress = fcv.run(make_args(tmp_path, point=point, slug="test-city-somewhere"), TOKEN)
+    assert progress["tiles"][fcv.tile_key(BIG_B)]["status"] == "completed"
+    assert progress["tiles"][fcv.tile_key(BIG_A)]["status"] == "not_started"
+
+    # a completed tile is fetched again (and overwritten)
+    api.calls["detections"].clear()
+    fcv.run(make_args(tmp_path, point=point, slug="test-city-somewhere"), TOKEN)
+    in_b = [i for i in IMAGES if mercantile.tile(*i["geometry"]["coordinates"], BIG_ZOOM) == BIG_B]
+    assert len(api.calls["detections"]) == len(in_b)
+    ids = set(gpd.read_parquet(tmp_path / "test-city-somewhere" / "tiles" / f"{fcv.tile_key(BIG_B)}.parquet")["id"])
+    assert ids == {i["id"] for i in in_b if i["id"] in SEGMENTED_IDS}
+
+
+def test_point_outside_the_city_is_an_error(tmp_path, api):
+    with pytest.raises(SystemExit, match="outside the boundary"):
+        fcv.run(make_args(tmp_path, point=(0.0, 0.0), slug="test-city-somewhere"), TOKEN)
+
+
+@pytest.mark.parametrize(
+    "argv, message",
+    [
+        (["Curitiba", "--point", "-25.4", "-49.2"], "requires --slug"),
+        (["Curitiba", "--point", "95", "-49.2", "--slug", "curitiba"], "invalid coordinates"),
+        (["Curitiba", "--point", "-25.4", "-200", "--slug", "curitiba"], "invalid coordinates"),
+    ],
+)
+def test_point_argument_validation(argv, message, capsys):
+    with pytest.raises(SystemExit):
+        fcv.main(argv)
+    assert message in capsys.readouterr().err

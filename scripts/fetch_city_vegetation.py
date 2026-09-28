@@ -752,6 +752,21 @@ def run(args, token):
     if args.max_big_tiles:
         todo = todo[: args.max_big_tiles]
 
+    if args.point:
+        # only the big tile containing the point, fetched again even if completed
+        lat, lon = args.point
+        if not polygon.contains(Point(lon, lat)):
+            raise SystemExit(f"❌ The point ({lat}, {lon}) is outside the boundary of {args.place!r}")
+        tile = mercantile.tile(lon, lat, args.big_zoom)
+        key = tile_key(tile)
+        progress["tiles"][key].update(
+            status="not_started", small_tiles_done=[], images=0, images_segmented=0
+        )
+        (city_dir / "partial" / f"{key}.parquet").unlink(missing_ok=True)
+        save_progress(progress, progress_path)
+        todo = [tile]
+        print(f"📍 point ({lat}, {lon}) → big tile {key}", flush=True)
+
     print(
         f"🏙️  {args.place} → {city_dir}: {len(big_tiles)} big tiles (zoom {args.big_zoom}), "
         f"{progress['summary']['completed']} completed, {len(todo)} to process this run",
@@ -850,7 +865,18 @@ def main(argv=None):
     parser.add_argument("--slug", default=None, help="Folder name of the city (default: from the place)")
     parser.add_argument("--osm-relation", type=int, default=None, help="Use this OpenStreetMap relation as the boundary")
     parser.add_argument("--boundary-only", action="store_true", help="Only resolve and save the boundary, then exit")
+    parser.add_argument(
+        "--point", nargs=2, type=float, metavar=("LAT", "LON"), default=None,
+        help="Only (re)fetch the big tile containing this point of the city; requires --slug",
+    )
     args = parser.parse_args(argv)
+
+    if args.point:
+        lat, lon = args.point
+        if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+            parser.error(f"--point: invalid coordinates ({lat}, {lon}); expected LAT in [-90, 90], LON in [-180, 180]")
+        if not args.slug:
+            parser.error("--point requires --slug (the folder name of the city in data/)")
 
     if args.small_zoom <= args.big_zoom:
         parser.error("--small-zoom must be larger than --big-zoom")

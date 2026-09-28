@@ -219,3 +219,6 @@ __marimo__/
 
 # temporary files of scripts/fetch_city_vegetation.py (atomic writes)
 *.tmp
+
+# local Mapillary token (see docs/running_locally.md)
+mapillary_token

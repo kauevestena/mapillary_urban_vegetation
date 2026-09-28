@@ -10,7 +10,7 @@ on:
     inputs:
       place:
         description: Place to query on OpenStreetMap
-        default: 'Curitiba, Parana, Brazil'
+        default: 'Curitiba'
       big_zoom:
         description: Zoom of the output tiles
         default: '14'
@@ -29,6 +29,12 @@ on:
       min_coverage:
         description: Keep images whose segmentation covers at least this % of the image
         default: '80'
+      point:
+        description: Only (re)fetch the big tile containing this point, as "lat,lon" (optional, needs slug)
+        default: ''
+      slug:
+        description: Folder name of the city in data/ (optional; required with point)
+        default: ''
 
 # never run two fetches at the same time (they would race on data/)
 concurrency:
@@ -62,29 +68,40 @@ jobs:
     - name: Fetch vegetation data
       env:
         API_TOKEN: ${{ secrets.API_TOKEN }}
-        PLACE: ${{ github.event.inputs.place || 'Curitiba, Parana, Brazil' }}
+        PLACE: ${{ github.event.inputs.place || 'Curitiba' }}
         BIG_ZOOM: ${{ github.event.inputs.big_zoom || '14' }}
         SMALL_ZOOM: ${{ github.event.inputs.small_zoom || '18' }}
         MAX_MINUTES: ${{ github.event.inputs.max_minutes || '320' }}
         OSM_RELATION: ${{ github.event.inputs.osm_relation }}
         MAX_BIG_TILES: ${{ github.event.inputs.max_big_tiles }}
         MIN_COVERAGE: ${{ github.event.inputs.min_coverage || '80' }}
+        POINT: ${{ github.event.inputs.point }}
+        SLUG: ${{ github.event.inputs.slug }}
       run: |
         extra=()
         if [ -n "$OSM_RELATION" ]; then extra+=(--osm-relation "$OSM_RELATION"); fi
         if [ -n "$MAX_BIG_TILES" ]; then extra+=(--max-big-tiles "$MAX_BIG_TILES"); fi
+        if [ -n "$SLUG" ]; then extra+=(--slug "$SLUG"); fi
+        if [ -n "$POINT" ]; then
+          IFS=', ' read -r lat lon <<< "$POINT"
+          extra+=(--point "$lat" "$lon")
+        fi
         python scripts/fetch_city_vegetation.py "$PLACE" \
           --big-zoom "$BIG_ZOOM" --small-zoom "$SMALL_ZOOM" --max-minutes "$MAX_MINUTES" \
           --min-coverage "$MIN_COVERAGE" "${extra[@]}"
 
-    - name: Commit data
+    - name: Build webmaps
+      if: success() || failure()
+      run: python scripts/build_webmaps.py
+
+    - name: Commit data and maps
       # not on cancelled runs, which may stop anywhere; the script's own
       # time budget checkpoints cleanly and ends as a success
       if: success() || failure()
       run: |
         git config --local user.email "action@github.com"
         git config --local user.name "GitHub Action"
-        git add data/
+        git add data/ maps/
         if git diff --cached --quiet; then
           echo "No new data"
           exit 0

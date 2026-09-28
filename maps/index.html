@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Urban vegetation · Mapillary</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@5/dist/maplibre-gl.css">
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+  <div id="map" role="region" aria-label="Map of the cities with vegetation data"></div>
+
+  <section id="info" class="panel">
+    <button class="toggle-info" type="button" aria-expanded="true">Hide</button>
+    <h1>Urban vegetation</h1>
+    <div class="muted">From Mapillary street-level images and their semantic segmentation.
+      <span id="city-count"></span></div>
+    <div class="details">
+      <ul id="cities" class="city-list"></ul>
+      <p class="muted">Updated 2026-09-28 ·
+        <a href="https://github.com/kauevestena/mapillary_urban_vegetation">source and data</a></p>
+    </div>
+  </section>
+
+  <div id="basemaps" class="panel" role="group" aria-label="Basemap"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/maplibre-gl@5/dist/maplibre-gl.js"></script>
+  <script src="assets/map.js"></script>
+  <script>initIndexMap();</script>
+</body>
+</html>
