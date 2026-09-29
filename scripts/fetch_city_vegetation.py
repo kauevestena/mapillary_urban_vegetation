@@ -41,6 +41,7 @@ from shapely.geometry import Point, box, mapping, shape
 from shapely.ops import unary_union
 from shapely.prepared import prep
 from tenacity import Retrying, retry_if_exception, stop_after_attempt, wait_exponential_jitter
+from tqdm import tqdm
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "my_mappilary_api"))
@@ -662,7 +663,16 @@ def process_small_tile(tile, polygon, token, args, executor):
         )
 
     rows = []
-    for image, detections in zip(images, executor.map(fetch, images)):
+    detections_iter = executor.map(fetch, images)
+    if getattr(args, "verbose", False) and len(images) > 10:
+        detections_iter = tqdm(
+            detections_iter,
+            total=len(images),
+            desc=f"   📸 {tile_key(tile)}",
+            unit="img",
+            leave=False,
+        )
+    for image, detections in zip(images, detections_iter):
         row = image_row(image, detections, args.min_coverage)
         if row:
             row["_small_tile"] = tile_key(tile)
@@ -774,8 +784,10 @@ def run(args, token):
     )
 
     completed_now = 0
+    verbose = getattr(args, "verbose", False)
+    big_bar = tqdm(todo, desc="🏙️  Big tiles", unit="tile", disable=not verbose)
     with ThreadPoolExecutor(max_workers=args.workers) as executor:
-        for big_tile in todo:
+        for big_tile in big_bar:
             if out_of_time():
                 break
 
@@ -788,11 +800,22 @@ def run(args, token):
             rows = load_partial(partial_path, done)
             state.update(status="in_progress", small_tiles_total=len(small_tiles))
             save_progress(progress, progress_path)
-            print(f"🧩 {key}: {len(done)}/{len(small_tiles)} small tiles already done", flush=True)
+            start_msg = f"🧩 {key}: {len(done)}/{len(small_tiles)} small tiles already done"
+            if verbose:
+                tqdm.write(start_msg)
+            else:
+                print(start_msg, flush=True)
 
             last_checkpoint = now()
             failures = 0
-            for small_tile in small_tiles:
+            small_bar = tqdm(
+                small_tiles,
+                desc=f"🧩 {key}",
+                unit="tile",
+                leave=False,
+                disable=not verbose,
+            )
+            for small_tile in small_bar:
                 small_key = tile_key(small_tile)
                 if small_key in done:
                     continue
@@ -805,14 +828,24 @@ def run(args, token):
                         checkpoint(rows, done, state, partial_path, progress, progress_path)
                         raise SystemExit(f"❌ Mapillary rejected the token: {mly.redact_token(e, token)[:300]}")
                     failures += 1
-                    print(f"❌ {small_key}: {mly.redact_token(e, token)[:300]}", flush=True)
+                    fail_msg = f"❌ {small_key}: {mly.redact_token(e, token)[:300]}"
+                    if verbose:
+                        tqdm.write(fail_msg)
+                    else:
+                        print(fail_msg, flush=True)
                     continue
                 rows.extend(tile_rows)
                 done.add(small_key)
                 state["images"] += images
+                if verbose:
+                    small_bar.set_postfix(
+                        images=state["images"],
+                        seg=len(rows),
+                    )
                 if now() - last_checkpoint >= CHECKPOINT_INTERVAL:
                     checkpoint(rows, done, state, partial_path, progress, progress_path)
                     last_checkpoint = now()
+            small_bar.close()
 
             if len(done) == len(small_tiles):
                 count = write_parquet(rows, city_dir / "tiles" / f"{key}.parquet")
@@ -823,11 +856,20 @@ def run(args, token):
                 save_progress(progress, progress_path)
                 completed_now += 1
                 share = f" ({100 * count / state['images']:.1f}%)" if state["images"] else ""
-                print(f"✅ {key}: completed, {count} segmented images of {state['images']}{share}", flush=True)
+                done_msg = f"✅ {key}: completed, {count} segmented images of {state['images']}{share}"
+                if verbose:
+                    tqdm.write(done_msg)
+                    big_bar.set_postfix(completed=progress["summary"]["completed"])
+                else:
+                    print(done_msg, flush=True)
             else:
                 checkpoint(rows, done, state, partial_path, progress, progress_path)
                 reason = "failed small tiles will be retried next run" if failures and not out_of_time() else "checkpointed"
-                print(f"⏸️  {key}: {len(done)}/{len(small_tiles)} small tiles done, {reason}", flush=True)
+                pause_msg = f"⏸️  {key}: {len(done)}/{len(small_tiles)} small tiles done, {reason}"
+                if verbose:
+                    tqdm.write(pause_msg)
+                else:
+                    print(pause_msg, flush=True)
 
     elapsed = (now() - started) / 60
     summary = progress["summary"]
@@ -868,6 +910,10 @@ def main(argv=None):
     parser.add_argument(
         "--point", nargs=2, type=float, metavar=("LAT", "LON"), default=None,
         help="Only (re)fetch the big tile containing this point of the city; requires --slug",
+    )
+    parser.add_argument(
+        "--verbose", "-v", action="store_true",
+        help="Show tqdm progress bars for big tiles, small tiles, and image detections",
     )
     args = parser.parse_args(argv)
 

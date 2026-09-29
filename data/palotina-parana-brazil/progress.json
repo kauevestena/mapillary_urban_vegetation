@@ -1,0 +1,1289 @@
+{
+  "place": "Palotina, Parana, Brazil",
+  "slug": "palotina-parana-brazil",
+  "schema_version": 2,
+  "big_zoom": 14,
+  "small_zoom": 18,
+  "min_coverage": 80.0,
+  "created_at": "2026-09-29T11:09:03Z",
+  "tiles": {
+    "14_5735_9333": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5735_9334": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5735_9335": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5735_9336": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5736_9323": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5736_9324": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5736_9325": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5736_9326": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5736_9327": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5736_9328": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5736_9329": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5736_9330": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5736_9331": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5736_9332": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5736_9333": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5736_9334": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5736_9335": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5736_9336": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5737_9323": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5737_9324": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5737_9325": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5737_9326": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5737_9327": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5737_9328": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5737_9329": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5737_9330": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5737_9331": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5737_9332": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5737_9333": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5737_9334": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5737_9335": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5737_9336": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5738_9324": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5738_9325": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5738_9326": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5738_9327": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5738_9328": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5738_9329": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5738_9330": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5738_9331": {
+      "status": "completed",
+      "small_tiles_total": 256,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0,
+      "completed_at": "2026-09-29T17:16:54Z"
+    },
+    "14_5738_9332": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5738_9333": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5738_9334": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5738_9335": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5738_9336": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5739_9326": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5739_9327": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5739_9328": {
+      "status": "in_progress",
+      "small_tiles_total": 256,
+      "small_tiles_done": [
+        "18_91824_149248",
+        "18_91824_149249",
+        "18_91824_149250",
+        "18_91825_149248",
+        "18_91825_149249",
+        "18_91825_149250",
+        "18_91826_149248",
+        "18_91826_149249",
+        "18_91826_149250",
+        "18_91826_149251",
+        "18_91827_149248",
+        "18_91827_149249",
+        "18_91827_149250",
+        "18_91827_149251"
+      ],
+      "images": 175,
+      "images_segmented": 139
+    },
+    "14_5739_9329": {
+      "status": "completed",
+      "small_tiles_total": 256,
+      "small_tiles_done": [],
+      "images": 61,
+      "images_segmented": 61,
+      "completed_at": "2026-09-29T16:27:30Z"
+    },
+    "14_5739_9330": {
+      "status": "completed",
+      "small_tiles_total": 256,
+      "small_tiles_done": [],
+      "images": 136,
+      "images_segmented": 136,
+      "completed_at": "2026-09-29T15:59:35Z"
+    },
+    "14_5739_9331": {
+      "status": "completed",
+      "small_tiles_total": 256,
+      "small_tiles_done": [],
+      "images": 146,
+      "images_segmented": 146,
+      "completed_at": "2026-09-29T16:31:44Z"
+    },
+    "14_5739_9332": {
+      "status": "completed",
+      "small_tiles_total": 256,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0,
+      "completed_at": "2026-09-29T16:04:22Z"
+    },
+    "14_5739_9333": {
+      "status": "completed",
+      "small_tiles_total": 256,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0,
+      "completed_at": "2026-09-29T16:33:11Z"
+    },
+    "14_5739_9334": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5739_9335": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5739_9336": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5740_9326": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5740_9327": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5740_9328": {
+      "status": "completed",
+      "small_tiles_total": 256,
+      "small_tiles_done": [],
+      "images": 126,
+      "images_segmented": 88,
+      "completed_at": "2026-09-29T16:15:03Z"
+    },
+    "14_5740_9329": {
+      "status": "completed",
+      "small_tiles_total": 256,
+      "small_tiles_done": [],
+      "images": 1050,
+      "images_segmented": 923,
+      "completed_at": "2026-09-29T15:06:15Z"
+    },
+    "14_5740_9330": {
+      "status": "completed",
+      "small_tiles_total": 256,
+      "small_tiles_done": [],
+      "images": 590,
+      "images_segmented": 470,
+      "completed_at": "2026-09-29T14:38:15Z"
+    },
+    "14_5740_9331": {
+      "status": "completed",
+      "small_tiles_total": 256,
+      "small_tiles_done": [],
+      "images": 915,
+      "images_segmented": 730,
+      "completed_at": "2026-09-29T14:18:16Z"
+    },
+    "14_5740_9332": {
+      "status": "completed",
+      "small_tiles_total": 256,
+      "small_tiles_done": [],
+      "images": 376,
+      "images_segmented": 142,
+      "completed_at": "2026-09-29T14:53:05Z"
+    },
+    "14_5740_9333": {
+      "status": "completed",
+      "small_tiles_total": 256,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0,
+      "completed_at": "2026-09-29T15:23:35Z"
+    },
+    "14_5740_9334": {
+      "status": "completed",
+      "small_tiles_total": 256,
+      "small_tiles_done": [],
+      "images": 199,
+      "images_segmented": 199,
+      "completed_at": "2026-09-29T16:29:43Z"
+    },
+    "14_5740_9335": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5740_9336": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5741_9325": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5741_9326": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5741_9327": {
+      "status": "completed",
+      "small_tiles_total": 253,
+      "small_tiles_done": [],
+      "images": 2131,
+      "images_segmented": 1442,
+      "completed_at": "2026-09-29T16:51:39Z"
+    },
+    "14_5741_9328": {
+      "status": "completed",
+      "small_tiles_total": 256,
+      "small_tiles_done": [],
+      "images": 4461,
+      "images_segmented": 2808,
+      "completed_at": "2026-09-29T15:31:08Z"
+    },
+    "14_5741_9329": {
+      "status": "completed",
+      "small_tiles_total": 256,
+      "small_tiles_done": [],
+      "images": 3344,
+      "images_segmented": 2348,
+      "completed_at": "2026-09-29T14:24:35Z"
+    },
+    "14_5741_9330": {
+      "status": "completed",
+      "small_tiles_total": 256,
+      "small_tiles_done": [],
+      "images": 6173,
+      "images_segmented": 4047,
+      "completed_at": "2026-09-29T13:27:22Z"
+    },
+    "14_5741_9331": {
+      "status": "completed",
+      "small_tiles_total": 256,
+      "small_tiles_done": [],
+      "images": 38247,
+      "images_segmented": 26443,
+      "completed_at": "2026-09-29T16:31:08Z"
+    },
+    "14_5741_9332": {
+      "status": "completed",
+      "small_tiles_total": 256,
+      "small_tiles_done": [],
+      "images": 20649,
+      "images_segmented": 11777,
+      "completed_at": "2026-09-29T14:05:47Z"
+    },
+    "14_5741_9333": {
+      "status": "completed",
+      "small_tiles_total": 256,
+      "small_tiles_done": [],
+      "images": 4490,
+      "images_segmented": 2879,
+      "completed_at": "2026-09-29T14:50:29Z"
+    },
+    "14_5741_9334": {
+      "status": "completed",
+      "small_tiles_total": 256,
+      "small_tiles_done": [],
+      "images": 3620,
+      "images_segmented": 2464,
+      "completed_at": "2026-09-29T15:57:15Z"
+    },
+    "14_5741_9335": {
+      "status": "completed",
+      "small_tiles_total": 256,
+      "small_tiles_done": [],
+      "images": 2950,
+      "images_segmented": 2002,
+      "completed_at": "2026-09-29T17:15:01Z"
+    },
+    "14_5741_9336": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5742_9326": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5742_9327": {
+      "status": "completed",
+      "small_tiles_total": 256,
+      "small_tiles_done": [],
+      "images": 3230,
+      "images_segmented": 2436,
+      "completed_at": "2026-09-29T16:44:03Z"
+    },
+    "14_5742_9328": {
+      "status": "completed",
+      "small_tiles_total": 256,
+      "small_tiles_done": [],
+      "images": 3200,
+      "images_segmented": 2365,
+      "completed_at": "2026-09-29T15:12:42Z"
+    },
+    "14_5742_9329": {
+      "status": "completed",
+      "small_tiles_total": 256,
+      "small_tiles_done": [],
+      "images": 2588,
+      "images_segmented": 1928,
+      "completed_at": "2026-09-29T14:14:47Z"
+    },
+    "14_5742_9330": {
+      "status": "completed",
+      "small_tiles_total": 256,
+      "small_tiles_done": [],
+      "images": 2857,
+      "images_segmented": 1922,
+      "completed_at": "2026-09-29T11:55:40Z"
+    },
+    "14_5742_9331": {
+      "status": "completed",
+      "small_tiles_total": 256,
+      "small_tiles_done": [],
+      "images": 12425,
+      "images_segmented": 8082,
+      "completed_at": "2026-09-29T11:29:41Z"
+    },
+    "14_5742_9332": {
+      "status": "completed",
+      "small_tiles_total": 256,
+      "small_tiles_done": [],
+      "images": 5380,
+      "images_segmented": 1604,
+      "completed_at": "2026-09-29T13:05:56Z"
+    },
+    "14_5742_9333": {
+      "status": "completed",
+      "small_tiles_total": 256,
+      "small_tiles_done": [],
+      "images": 773,
+      "images_segmented": 472,
+      "completed_at": "2026-09-29T14:28:29Z"
+    },
+    "14_5742_9334": {
+      "status": "completed",
+      "small_tiles_total": 256,
+      "small_tiles_done": [],
+      "images": 158,
+      "images_segmented": 158,
+      "completed_at": "2026-09-29T15:43:29Z"
+    },
+    "14_5742_9335": {
+      "status": "completed",
+      "small_tiles_total": 256,
+      "small_tiles_done": [],
+      "images": 790,
+      "images_segmented": 506,
+      "completed_at": "2026-09-29T17:09:00Z"
+    },
+    "14_5742_9336": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5743_9325": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5743_9326": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5743_9327": {
+      "status": "completed",
+      "small_tiles_total": 256,
+      "small_tiles_done": [],
+      "images": 8241,
+      "images_segmented": 5524,
+      "completed_at": "2026-09-29T17:05:59Z"
+    },
+    "14_5743_9328": {
+      "status": "completed",
+      "small_tiles_total": 256,
+      "small_tiles_done": [],
+      "images": 5022,
+      "images_segmented": 3265,
+      "completed_at": "2026-09-29T15:40:00Z"
+    },
+    "14_5743_9329": {
+      "status": "completed",
+      "small_tiles_total": 256,
+      "small_tiles_done": [],
+      "images": 3037,
+      "images_segmented": 2087,
+      "completed_at": "2026-09-29T14:34:27Z"
+    },
+    "14_5743_9330": {
+      "status": "completed",
+      "small_tiles_total": 256,
+      "small_tiles_done": [],
+      "images": 4131,
+      "images_segmented": 2972,
+      "completed_at": "2026-09-29T13:34:46Z"
+    },
+    "14_5743_9331": {
+      "status": "completed",
+      "small_tiles_total": 256,
+      "small_tiles_done": [],
+      "images": 5993,
+      "images_segmented": 4443,
+      "completed_at": "2026-09-29T16:31:40Z"
+    },
+    "14_5743_9332": {
+      "status": "completed",
+      "small_tiles_total": 256,
+      "small_tiles_done": [],
+      "images": 821,
+      "images_segmented": 369,
+      "completed_at": "2026-09-29T14:09:13Z"
+    },
+    "14_5743_9333": {
+      "status": "completed",
+      "small_tiles_total": 256,
+      "small_tiles_done": [],
+      "images": 447,
+      "images_segmented": 0,
+      "completed_at": "2026-09-29T14:55:29Z"
+    },
+    "14_5743_9334": {
+      "status": "completed",
+      "small_tiles_total": 256,
+      "small_tiles_done": [],
+      "images": 383,
+      "images_segmented": 175,
+      "completed_at": "2026-09-29T16:02:27Z"
+    },
+    "14_5743_9335": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5743_9336": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5744_9325": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5744_9326": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5744_9327": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5744_9328": {
+      "status": "completed",
+      "small_tiles_total": 256,
+      "small_tiles_done": [],
+      "images": 5368,
+      "images_segmented": 2925,
+      "completed_at": "2026-09-29T16:25:33Z"
+    },
+    "14_5744_9329": {
+      "status": "completed",
+      "small_tiles_total": 256,
+      "small_tiles_done": [],
+      "images": 6335,
+      "images_segmented": 4128,
+      "completed_at": "2026-09-29T15:21:54Z"
+    },
+    "14_5744_9330": {
+      "status": "completed",
+      "small_tiles_total": 256,
+      "small_tiles_done": [],
+      "images": 836,
+      "images_segmented": 569,
+      "completed_at": "2026-09-29T14:58:56Z"
+    },
+    "14_5744_9331": {
+      "status": "completed",
+      "small_tiles_total": 256,
+      "small_tiles_done": [],
+      "images": 1170,
+      "images_segmented": 430,
+      "completed_at": "2026-09-29T14:42:39Z"
+    },
+    "14_5744_9332": {
+      "status": "completed",
+      "small_tiles_total": 256,
+      "small_tiles_done": [],
+      "images": 1007,
+      "images_segmented": 684,
+      "completed_at": "2026-09-29T15:02:24Z"
+    },
+    "14_5744_9333": {
+      "status": "completed",
+      "small_tiles_total": 256,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0,
+      "completed_at": "2026-09-29T16:31:41Z"
+    },
+    "14_5744_9334": {
+      "status": "completed",
+      "small_tiles_total": 256,
+      "small_tiles_done": [],
+      "images": 257,
+      "images_segmented": 257,
+      "completed_at": "2026-09-29T16:46:17Z"
+    },
+    "14_5744_9335": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5744_9336": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5745_9325": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5745_9326": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5745_9327": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5745_9328": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5745_9329": {
+      "status": "completed",
+      "small_tiles_total": 256,
+      "small_tiles_done": [],
+      "images": 1749,
+      "images_segmented": 659,
+      "completed_at": "2026-09-29T16:37:51Z"
+    },
+    "14_5745_9330": {
+      "status": "completed",
+      "small_tiles_total": 256,
+      "small_tiles_done": [],
+      "images": 1073,
+      "images_segmented": 170,
+      "completed_at": "2026-09-29T16:13:03Z"
+    },
+    "14_5745_9331": {
+      "status": "completed",
+      "small_tiles_total": 256,
+      "small_tiles_done": [],
+      "images": 1977,
+      "images_segmented": 919,
+      "completed_at": "2026-09-29T16:09:31Z"
+    },
+    "14_5745_9332": {
+      "status": "completed",
+      "small_tiles_total": 256,
+      "small_tiles_done": [],
+      "images": 560,
+      "images_segmented": 290,
+      "completed_at": "2026-09-29T16:17:51Z"
+    },
+    "14_5745_9333": {
+      "status": "completed",
+      "small_tiles_total": 256,
+      "small_tiles_done": [],
+      "images": 832,
+      "images_segmented": 624,
+      "completed_at": "2026-09-29T16:54:55Z"
+    },
+    "14_5745_9334": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5745_9335": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5745_9336": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5746_9325": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5746_9326": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5746_9327": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5746_9328": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5746_9329": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5746_9330": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5746_9331": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5746_9332": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5746_9333": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5746_9334": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5746_9335": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5746_9336": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5747_9326": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5747_9327": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5747_9328": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5747_9329": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5747_9330": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5747_9331": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5747_9332": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5747_9333": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5747_9334": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5747_9335": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5747_9336": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5747_9337": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5747_9338": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5747_9339": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5747_9340": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5747_9341": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5748_9326": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5748_9327": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5748_9328": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5748_9329": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5748_9330": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5748_9331": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5748_9332": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5748_9334": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5748_9335": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5748_9336": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5748_9337": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5748_9338": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5748_9339": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5749_9330": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5749_9331": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5749_9336": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5749_9337": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    },
+    "14_5749_9338": {
+      "status": "not_started",
+      "small_tiles_total": null,
+      "small_tiles_done": [],
+      "images": 0,
+      "images_segmented": 0
+    }
+  },
+  "updated_at": "2026-09-29T17:17:21Z",
+  "summary": {
+    "big_tiles": 172,
+    "completed": 51,
+    "in_progress": 1,
+    "not_started": 120,
+    "images_segmented": 109207
+  }
+}

@@ -586,3 +586,8 @@ def test_point_argument_validation(argv, message, capsys):
     with pytest.raises(SystemExit):
         fcv.main(argv)
     assert message in capsys.readouterr().err
+
+
+def test_verbose_run(tmp_path, api):
+    progress = fcv.run(make_args(tmp_path, verbose=True), TOKEN)
+    assert progress["summary"]["completed"] == 2
