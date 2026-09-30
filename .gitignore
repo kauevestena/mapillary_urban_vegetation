@@ -223,3 +223,9 @@ __marimo__/
 
 # local Mapillary token (see docs/running_locally.md)
 mapillary_token
+
+# Large city-scale datasets
+data/curitiba/segments.parquet
+data/curitiba/voronoi.parquet
+maps/curitiba/segments.geojson
+maps/curitiba/voronoi.geojson
