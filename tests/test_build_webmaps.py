@@ -107,3 +107,27 @@ def test_city_name_is_escaped_in_the_title(tmp_path):
     page = (out / "odd" / "index.html").read_text()
     assert "<title>&lt;b&gt;Odd&lt;/b&gt; &amp; Co · Urban vegetation</title>" in page
     assert "</b>" not in page.split('id="config">')[1].split("</script>")[0]  # no "</" in the JSON config
+
+
+def test_build_with_segments_and_voronoi(tmp_path):
+    from shapely.geometry import LineString, Polygon
+    data, out = tmp_path / "data", tmp_path / "maps"
+    city = make_city(data, "geo-city", ROWS)
+
+    # Save mock segments.parquet and voronoi.parquet
+    seg = gpd.GeoDataFrame({"segment_id": [1], "name": ["Main St"], "geometry": [LineString([(0, 0), (1, 1)])]}, crs="EPSG:4326")
+    seg.to_parquet(city / "segments.parquet", index=False)
+
+    vor = gpd.GeoDataFrame({"segment_id": [1], "geometry": [Polygon([(0, 0), (1, 0), (1, 1), (0, 1), (0, 0)])]}, crs="EPSG:4326")
+    vor.to_parquet(city / "voronoi.parquet", index=False)
+
+    bw.build(data, out)
+
+    city_out = out / "geo-city"
+    assert (city_out / "segments.geojson").exists()
+    assert (city_out / "voronoi.geojson").exists()
+    assert (city_out / "points.geojson").exists()
+
+    config = json.loads((city_out / "index.html").read_text().split('id="config">')[1].split("</script>")[0])
+    assert config["has_segments"] is True
+    assert config["has_voronoi"] is True

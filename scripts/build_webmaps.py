@@ -80,6 +80,7 @@ def load_city(city_dir):
         "boundary": shape(feature["geometry"]),
         "points": points,
         "progress": progress,
+        "city_dir": city_dir,
     }
 
 
@@ -135,12 +136,43 @@ def build_city(city, out_dir):
     stats = city_stats(city)
     boundary = city["boundary"].simplify(CITY_BOUNDARY_TOLERANCE, preserve_topology=True)
     minx, miny, maxx, maxy = city["boundary"].bounds
+    city_dir = city.get("city_dir")
+    has_segments = False
+    has_voronoi = False
+
+    if city_dir:
+        seg_file = city_dir / "segments.parquet"
+        vor_file = city_dir / "voronoi.parquet"
+        if seg_file.exists():
+            try:
+                segs = gpd.read_parquet(seg_file)
+                if not segs.empty:
+                    segs_simple = segs.copy()
+                    segs_simple["geometry"] = segs_simple.geometry.simplify(0.00002, preserve_topology=True)
+                    write_json(json.loads(segs_simple.to_json(drop_id=True)), city_out / "segments.geojson")
+                    has_segments = True
+            except Exception as e:
+                print(f"   warning: failed to write segments.geojson: {e}")
+
+        if vor_file.exists():
+            try:
+                vor = gpd.read_parquet(vor_file)
+                if not vor.empty:
+                    vor_simple = vor.copy()
+                    vor_simple["geometry"] = vor_simple.geometry.simplify(0.00005, preserve_topology=True)
+                    write_json(json.loads(vor_simple.to_json(drop_id=True)), city_out / "voronoi.geojson")
+                    has_voronoi = True
+            except Exception as e:
+                print(f"   warning: failed to write voronoi.geojson: {e}")
+
     config = {
         "slug": city["slug"],
         "name": city["name"],
         "display_name": city["display_name"],
         "bounds": [minx, miny, maxx, maxy],
         "stats": stats,
+        "has_segments": has_segments,
+        "has_voronoi": has_voronoi,
     }
 
     write_json(points_geojson(city["points"]), city_out / "points.geojson")

@@ -16,16 +16,38 @@
     <h1 id="city-name"></h1>
     <div id="city-full-name" class="muted"></div>
     <div class="details">
+      <div id="controls" class="controls-panel">
+        <div class="control-row" id="metric-control-row">
+          <label for="metric-select"><strong>Vegetation metric:</strong></label>
+          <select id="metric-select" aria-label="Select metric">
+            <option value="veg_median" selected>Median vegetation</option>
+            <option value="veg_mean">Mean vegetation</option>
+            <option value="veg_min">Minimum vegetation</option>
+            <option value="veg_max">Maximum vegetation</option>
+            <option value="veg_std">Standard deviation</option>
+            <option value="veg_iqr">IQR (Q3 − Q1)</option>
+            <option value="h_median">Median altitude</option>
+            <option value="count">Photo count</option>
+          </select>
+        </div>
+        <div class="control-row" id="layers-control-row">
+          <span class="control-label"><strong>Layers:</strong></span>
+          <div class="layer-checkboxes">
+            <label id="lbl-segments"><input type="checkbox" id="layer-segments" checked> Streets</label>
+            <label id="lbl-voronoi"><input type="checkbox" id="layer-voronoi"> Line Voronoi</label>
+            <label id="lbl-points"><input type="checkbox" id="layer-points"> Photos</label>
+          </div>
+        </div>
+      </div>
       <dl id="stats"></dl>
       <div id="legend" class="legend"></div>
-      <p class="muted">Each dot is a Mapillary image with a full semantic segmentation; its color is the
-        share of the image classified as vegetation. Click a dot to open the image.</p>
+      <p id="legend-note" class="muted">Streets are colored by the selected vegetation metric. Click any street or Voronoi cell for detailed statistics.</p>
     </div>
   </section>
 
   <div id="basemaps" class="panel" role="group" aria-label="Basemap"></div>
 
-  <script type="application/json" id="config">{"slug": "curitiba", "name": "Curitiba", "display_name": "Curitiba, Paraná, Região Sul, Brasil", "bounds": [-49.38914, -25.6435043, -49.1843182, -25.3450768], "stats": {"images": 118254, "vegetation_median": 7.2, "vegetation_mean": 11.6, "date_min": "2020-10-28", "date_max": "2026-05-31", "tiles_completed": 49, "tiles_total": 116, "updated": "2026-09-30"}}</script>
+  <script type="application/json" id="config">{"slug": "curitiba", "name": "Curitiba", "display_name": "Curitiba, Paraná, Região Sul, Brasil", "bounds": [-49.38914, -25.6435043, -49.1843182, -25.3450768], "stats": {"images": 118254, "vegetation_median": 7.2, "vegetation_mean": 11.6, "date_min": "2020-10-28", "date_max": "2026-05-31", "tiles_completed": 49, "tiles_total": 116, "updated": "2026-09-30"}, "has_segments": false, "has_voronoi": false}</script>
   <script src="https://cdn.jsdelivr.net/npm/maplibre-gl@5/dist/maplibre-gl.js"></script>
   <script src="../assets/map.js"></script>
   <script>initCityMap(JSON.parse(document.getElementById("config").textContent));</script>

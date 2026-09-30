@@ -107,6 +107,52 @@ a { color: var(--accent); }
   box-shadow: var(--shadow);
 }
 
+/* Controls panel: metric select and layer toggles */
+.controls-panel {
+  margin: 10px 0;
+  padding: 8px 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.control-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.control-row select {
+  font: inherit;
+  font-size: 13px;
+  background: var(--surface-2);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 8px;
+  cursor: pointer;
+  outline: none;
+}
+.control-row select:focus {
+  border-color: var(--accent);
+}
+.layer-checkboxes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  font-size: 12px;
+}
+.layer-checkboxes label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+}
+.layer-checkboxes input[type="checkbox"] {
+  cursor: pointer;
+  accent-color: var(--accent);
+}
+
 /* popups follow the panel theme */
 .maplibregl-popup-content {
   background: var(--surface);
@@ -114,11 +160,31 @@ a { color: var(--accent); }
   border-radius: 8px;
   box-shadow: var(--shadow);
   font-size: 13px;
-  padding: 8px 10px;
+  padding: 10px 12px;
+  max-width: 320px;
 }
 .maplibregl-popup-tip { border-top-color: var(--surface) !important; border-bottom-color: var(--surface) !important; }
 .maplibregl-popup-close-button { color: var(--text-secondary); }
-.popup-value { font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.popup-title { font-size: 15px; font-weight: 600; margin-bottom: 2px; }
+.popup-meta { margin-bottom: 6px; }
+.popup-value { font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--accent); }
+.popup-sub { margin-bottom: 6px; }
+.popup-nodata { font-size: 12px; font-style: italic; color: var(--text-secondary); margin-top: 4px; }
+.popup-stats-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+  margin-top: 6px;
+  border-top: 1px solid var(--border);
+  padding-top: 4px;
+}
+.popup-stats-table td {
+  padding: 2px 4px;
+  font-variant-numeric: tabular-nums;
+}
+.popup-stats-table td:nth-child(odd) {
+  color: var(--text-secondary);
+}
 
 .toggle-info { display: none; }
 
