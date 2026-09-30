@@ -239,13 +239,17 @@ def load_mapillary_points(city_dir):
     return gpd.GeoDataFrame(combined, geometry="geometry", crs="EPSG:4326")
 
 
-def compute_segment_statistics(series_veg, series_h=None):
-    """Compute descriptive statistics for a segment's points."""
+def compute_segment_statistics(series_veg, series_h=None, min_photos=5):
+    """Compute descriptive statistics for a segment's points.
+
+    If fewer than min_photos are present, the segment is considered to have
+    no data (all statistical metrics are None, while photo count is still recorded).
+    """
     veg = series_veg.dropna()
     n = len(veg)
-    if n == 0:
+    if n < min_photos:
         return {
-            "count": 0,
+            "count": n,
             "veg_median": None,
             "veg_mean": None,
             "veg_min": None,
@@ -301,7 +305,7 @@ def compute_segment_statistics(series_veg, series_h=None):
     }
 
 
-def attribute_vegetation_statistics(segments_gdf, voronoi_gdf, points_gdf, utm_crs):
+def attribute_vegetation_statistics(segments_gdf, voronoi_gdf, points_gdf, utm_crs, min_photos=5):
     """
     Match Mapillary points into each segment Voronoi polygon and compute statistics.
     Joins the statistics back to both segments_gdf and voronoi_gdf.
@@ -312,7 +316,7 @@ def attribute_vegetation_statistics(segments_gdf, voronoi_gdf, points_gdf, utm_c
 
     if points_gdf.empty or voronoi_gdf.empty:
         # No points yet (incomplete / initial run)
-        empty_stats = compute_segment_statistics(pd.Series([], dtype=float))
+        empty_stats = compute_segment_statistics(pd.Series([], dtype=float), min_photos=min_photos)
         for key, val in empty_stats.items():
             segments_gdf[key] = val
             voronoi_gdf[key] = val
@@ -345,12 +349,12 @@ def attribute_vegetation_statistics(segments_gdf, voronoi_gdf, points_gdf, utm_c
 
     for seg_id, group in by_segment:
         matched_ids.add(seg_id)
-        stat = compute_segment_statistics(group["vegetation_percent"], group.get("h"))
+        stat = compute_segment_statistics(group["vegetation_percent"], group.get("h"), min_photos=min_photos)
         stat["segment_id"] = seg_id
         stats_list.append(stat)
 
     # Add empty stats for segments without points
-    empty_template = compute_segment_statistics(pd.Series([], dtype=float))
+    empty_template = compute_segment_statistics(pd.Series([], dtype=float), min_photos=min_photos)
     for seg_id in all_segment_ids - matched_ids:
         stat = dict(empty_template)
         stat["segment_id"] = seg_id
@@ -405,6 +409,7 @@ def process_city(
     maps_dir=None,
     tolerance_segments=0.00002,
     tolerance_voronoi=0.00005,
+    min_photos=5,
 ):
     """Full execution pipeline for a single city folder."""
     city_dir = Path(city_dir)
@@ -440,8 +445,10 @@ def process_city(
     print(f"   Loaded {len(points):,} Mapillary images from completed tiles.")
 
     # Step 4: Attribute descriptive statistics
-    print("   Computing descriptive statistics for segments...")
-    segments, voronoi = attribute_vegetation_statistics(segments, voronoi, points, utm_crs)
+    print(f"   Computing descriptive statistics for segments (min_photos={min_photos})...")
+    segments, voronoi = attribute_vegetation_statistics(
+        segments, voronoi, points, utm_crs, min_photos=min_photos
+    )
 
     # Step 5: Overwrite segments.parquet and voronoi.parquet
     segments.to_parquet(segments_path, index=False)
@@ -513,6 +520,12 @@ def main(argv=None):
         help="Output maps directory (default: maps/)",
     )
     parser.add_argument(
+        "--min-photos",
+        type=int,
+        default=5,
+        help="Minimum photos in a Voronoi polygon to compute descriptive statistics (default: 5)",
+    )
+    parser.add_argument(
         "--all",
         action="store_true",
         dest="process_all",
@@ -535,6 +548,7 @@ def main(argv=None):
                 rebuild_network=args.rebuild_network,
                 export_webmap=args.export_webmap,
                 maps_dir=args.maps_dir,
+                min_photos=args.min_photos,
             )
     else:
         if not args.place_or_slug:
@@ -557,6 +571,7 @@ def main(argv=None):
             rebuild_network=args.rebuild_network,
             export_webmap=args.export_webmap,
             maps_dir=args.maps_dir,
+            min_photos=args.min_photos,
         )
 
 

@@ -221,7 +221,7 @@ function metricColorExpression(metricName, themeName, hasCountCheck = true) {
 
   return [
     "case",
-    ["any", ["==", ["coalesce", ["get", "count"], 0], 0], ["==", ["get", metricName], null]],
+    ["any", ["<", ["coalesce", ["get", "count"], 0], 5], ["==", ["get", metricName], null]],
     nullColor,
     interpExpr,
   ];
@@ -250,11 +250,11 @@ function renderLegend(themeName, metricName = "veg_median") {
   rampBox.appendChild(ticksRow);
   legend.appendChild(rampBox);
 
-  // Unsurveyed street indicator
+  // Unsurveyed / insufficient photos indicator
   const unRow = el("div", { class: "legend-row legend-unvisited-row" });
   const unSwatch = el("span", { class: "legend-swatch unvisited" });
   unSwatch.style.background = UNSURVEYED_COLOR[themeName];
-  unRow.append(unSwatch, el("span", { class: "muted" }, "No Mapillary photos"));
+  unRow.append(unSwatch, el("span", { class: "muted" }, "No data (< 5 photos)"));
   legend.appendChild(unRow);
 }
 
@@ -286,8 +286,14 @@ function segmentPopupContent(p, currentMetric) {
   if (meta.length) box.append(el("div", { class: "muted popup-meta" }, meta.join(" · ")));
 
   const count = Number(p.count) || 0;
-  if (count === 0) {
-    box.append(el("div", { class: "popup-nodata" }, "No Mapillary photos on this segment yet"));
+  if (count < 5) {
+    if (count === 0) {
+      box.append(el("div", { class: "popup-nodata" }, "No Mapillary photos on this segment yet"));
+    } else {
+      box.append(
+        el("div", { class: "popup-nodata" }, `No data (${count} photo${count === 1 ? "" : "s"} — minimum 5 required)`)
+      );
+    }
     return box;
   }
 
@@ -414,7 +420,7 @@ async function initCityMap(config) {
           "fill-color": metricColorExpression(currentMetric, themeName),
           "fill-opacity": [
             "case",
-            ["==", ["coalesce", ["get", "count"], 0], 0],
+            ["<", ["coalesce", ["get", "count"], 0], 5],
             0.05,
             0.35,
           ],
@@ -449,7 +455,7 @@ async function initCityMap(config) {
           "line-width": ["interpolate", ["linear"], ["zoom"], 10, 1.5, 13, 2.5, 15, 4.5, 17, 7.5],
           "line-opacity": [
             "case",
-            ["==", ["coalesce", ["get", "count"], 0], 0],
+            ["<", ["coalesce", ["get", "count"], 0], 5],
             0.35,
             0.95,
           ],

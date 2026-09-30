@@ -72,8 +72,14 @@ def test_compute_segment_statistics():
     assert empty["veg_mean"] is None
     assert empty["h_median"] is None
 
-    # 2. Single item
-    single = pss.compute_segment_statistics(pd.Series([25.4]), pd.Series([920.5]))
+    # 2. Single item with default min_photos=5 -> considered no data
+    single_default = pss.compute_segment_statistics(pd.Series([25.4]), pd.Series([920.5]))
+    assert single_default["count"] == 1
+    assert single_default["veg_median"] is None
+    assert single_default["veg_mean"] is None
+
+    # Single item with min_photos=1
+    single = pss.compute_segment_statistics(pd.Series([25.4]), pd.Series([920.5]), min_photos=1)
     assert single["count"] == 1
     assert single["veg_median"] == 25.4
     assert single["veg_mean"] == 25.4
@@ -86,7 +92,7 @@ def test_compute_segment_statistics():
     assert single["veg_iqr"] == 0.0
     assert single["h_median"] == 920.5
 
-    # 3. Multiple items with known distributions
+    # 3. Multiple items (>= 5) with known distributions
     vals = pd.Series([10.0, 20.0, 20.0, 30.0, 40.0])
     heights = pd.Series([100.0, 105.0, 110.0, 115.0, 120.0])
     stats = pss.compute_segment_statistics(vals, heights)
@@ -139,7 +145,14 @@ def test_generate_line_voronoi_and_attribution_pipeline(tmp_path):
         crs="EPSG:4326",
     )
 
-    segs_attr, vor_attr = pss.attribute_vegetation_statistics(segments, voronoi, points_gdf, utm_crs)
+    # 1. With default min_photos=5, 3 points is considered no data for stats
+    segs_default, _ = pss.attribute_vegetation_statistics(segments.copy(), voronoi.copy(), points_gdf, utm_crs)
+    row0_def = segs_default[segs_default["segment_id"] == 0].iloc[0]
+    assert row0_def["count"] == 3
+    assert pd.isna(row0_def["veg_median"])
+
+    # 2. With min_photos=3, stats are computed
+    segs_attr, vor_attr = pss.attribute_vegetation_statistics(segments, voronoi, points_gdf, utm_crs, min_photos=3)
 
     assert len(segs_attr) == 2
     row0 = segs_attr[segs_attr["segment_id"] == 0].iloc[0]
