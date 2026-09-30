@@ -159,10 +159,49 @@ def safe_union_cells(cell_list):
     except Exception:
         pass
     try:
-        # Buffer by 1 cm to cleanly merge micro-slivers, then union
-        return shapely.unary_union([c.buffer(0.01) for c in cell_list])
+        # Buffer by 0 to cleanly resolve self-intersections without expanding, then union
+        return shapely.unary_union([shapely.buffer(c, 0) for c in cell_list])
     except Exception:
-        return shapely.unary_union([shapely.make_valid(c.buffer(0.01)) for c in cell_list])
+        return shapely.unary_union([shapely.make_valid(c) for c in cell_list])
+
+
+def fill_boundary_gaps(voronoi_gdf, boundary_geom, area_threshold=None):
+    """Ensure voronoi_gdf completely covers boundary_geom with zero gaps.
+
+    Any residual gaps between the Voronoi coverage and boundary are merged
+    into the adjacent Voronoi polygon sharing the longest boundary.
+    """
+    if area_threshold is None:
+        is_geographic = voronoi_gdf.crs and voronoi_gdf.crs.is_geographic
+        area_threshold = 1e-14 if is_geographic else 1e-6
+    vor_union = shapely.unary_union(voronoi_gdf.geometry)
+    diff = boundary_geom.difference(vor_union)
+    if diff.is_empty or diff.area < area_threshold:
+        return voronoi_gdf
+
+    gaps = [g for g in (diff.geoms if hasattr(diff, "geoms") else [diff]) if g.area >= area_threshold]
+    if not gaps:
+        return voronoi_gdf
+
+    sindex = voronoi_gdf.sindex
+    geoms = voronoi_gdf.geometry.copy()
+
+    for gap in gaps:
+        possible_indices = list(sindex.intersection(gap.bounds))
+        if not possible_indices:
+            continue
+        candidates = geoms.iloc[possible_indices]
+        shared_lengths = [gap.intersection(c).length for c in candidates]
+        if max(shared_lengths) > 0:
+            best_idx = possible_indices[int(np.argmax(shared_lengths))]
+            geoms.iloc[best_idx] = shapely.unary_union([geoms.iloc[best_idx], gap])
+        else:
+            dists = [gap.distance(c) for c in candidates]
+            best_idx = possible_indices[int(np.argmin(dists))]
+            geoms.iloc[best_idx] = shapely.unary_union([geoms.iloc[best_idx], gap])
+
+    voronoi_gdf["geometry"] = geoms
+    return voronoi_gdf
 
 
 def generate_line_voronoi(segments_gdf, boundary_geom, step=1.0):
@@ -170,12 +209,13 @@ def generate_line_voronoi(segments_gdf, boundary_geom, step=1.0):
     Generate Line Voronoi polygons for each street segment:
     1. Project to local metric UTM.
     2. Densify points every `step` meters with centered spacing.
-    3. Compute point Voronoi diagram with GEOS ordered=True.
+    3. Compute point Voronoi diagram with GEOS ordered=True, extended past the boundary.
     4. Group cells by segment_id and dissolve with safe_union_cells.
-    5. Clip to city boundary.
+    5. Clip to city boundary and fill residual boundary gaps.
     """
     utm_crs = segments_gdf.estimate_utm_crs()
     segments_utm = segments_gdf.to_crs(utm_crs)
+    boundary_utm = gpd.GeoSeries([boundary_geom], crs="EPSG:4326").to_crs(utm_crs).iloc[0]
 
     t0 = time.time()
     coords, seg_ids = densify_segment_points(segments_utm, step=step)
@@ -183,13 +223,20 @@ def generate_line_voronoi(segments_gdf, boundary_geom, step=1.0):
 
     t1 = time.time()
     mp = MultiPoint(coords)
-    # ordered=True preserves 1-to-1 index alignment with input points
-    vor_res = shapely.voronoi_polygons(mp, ordered=True)
+    # Extend Voronoi envelope beyond boundary polygon to ensure infinite peripheral rays cover all boundary areas
+    env = boundary_utm.envelope.buffer(50000)
+    vor_res = shapely.voronoi_polygons(mp, extend_to=env, ordered=True)
+    cells = np.array(vor_res.geoms)
+
+    # Sanitize any self-intersecting polygon cells produced by GEOS Voronoi
+    is_val = shapely.is_valid(cells)
+    if (~is_val).any():
+        cells[~is_val] = shapely.buffer(cells[~is_val], 0)
+
     t_voronoi = time.time() - t1
 
     t2 = time.time()
     # Group Voronoi polygon cells by segment_id
-    cells = np.array(vor_res.geoms)
     df_cells = pd.DataFrame({"segment_id": seg_ids, "cell": cells})
     groups = df_cells.groupby("segment_id")["cell"].apply(list)
 
@@ -204,12 +251,17 @@ def generate_line_voronoi(segments_gdf, boundary_geom, step=1.0):
     t_dissolve = time.time() - t2
 
     # Clip Voronoi polygons to boundary polygon
-    boundary_utm = gpd.GeoSeries([boundary_geom], crs="EPSG:4326").to_crs(utm_crs).iloc[0]
     voronoi_clipped = voronoi_utm.clip(boundary_utm)
     voronoi_clipped = voronoi_clipped[voronoi_clipped.geometry.notnull() & ~voronoi_clipped.geometry.is_empty].copy()
 
+    # Fill any residual boundary sliver gaps to guarantee 100% municipal coverage in metric space
+    voronoi_clipped = fill_boundary_gaps(voronoi_clipped, boundary_utm)
+
     # Reproject back to EPSG:4326
     voronoi_4326 = voronoi_clipped.to_crs("EPSG:4326")
+
+    # Cleanly eliminate any slight reprojection deflection along the boundary
+    voronoi_4326 = fill_boundary_gaps(voronoi_4326, boundary_geom)
 
     print(
         f"   Voronoi generation ({len(coords):,} points): densify {t_densify:.2f}s, "
@@ -392,7 +444,16 @@ def export_geojson(gdf, out_path, tolerance=0.00002):
 
     simplified = gdf.copy()
     if tolerance > 0:
-        simplified["geometry"] = simplified.geometry.simplify(tolerance, preserve_topology=True)
+        geom_types = set(simplified.geometry.geom_type.dropna())
+        if geom_types.issubset({"Polygon", "MultiPolygon"}) and hasattr(shapely, "coverage_simplify"):
+            try:
+                simplified["geometry"] = shapely.coverage_simplify(
+                    simplified.geometry.values, tolerance=tolerance, simplify_boundary=False
+                )
+            except Exception:
+                simplified["geometry"] = simplified.geometry.simplify(tolerance, preserve_topology=True)
+        else:
+            simplified["geometry"] = simplified.geometry.simplify(tolerance, preserve_topology=True)
 
     tmp_path = f"{out_path}.tmp"
     with open(tmp_path, "w", encoding="utf-8") as f:
@@ -408,7 +469,7 @@ def process_city(
     export_webmap=False,
     maps_dir=None,
     tolerance_segments=0.00002,
-    tolerance_voronoi=0.00005,
+    tolerance_voronoi=0.0,
     min_photos=5,
 ):
     """Full execution pipeline for a single city folder."""
@@ -520,6 +581,18 @@ def main(argv=None):
         help="Output maps directory (default: maps/)",
     )
     parser.add_argument(
+        "--tolerance-segments",
+        type=float,
+        default=0.00002,
+        help="Geometry simplification tolerance for segments GeoJSON in degrees (default: 0.00002)",
+    )
+    parser.add_argument(
+        "--tolerance-voronoi",
+        type=float,
+        default=0.0,
+        help="Geometry simplification tolerance for Voronoi GeoJSON in degrees (default: 0.0, preserves exact coverage)",
+    )
+    parser.add_argument(
         "--min-photos",
         type=int,
         default=5,
@@ -548,6 +621,8 @@ def main(argv=None):
                 rebuild_network=args.rebuild_network,
                 export_webmap=args.export_webmap,
                 maps_dir=args.maps_dir,
+                tolerance_segments=args.tolerance_segments,
+                tolerance_voronoi=args.tolerance_voronoi,
                 min_photos=args.min_photos,
             )
     else:
@@ -571,6 +646,8 @@ def main(argv=None):
             rebuild_network=args.rebuild_network,
             export_webmap=args.export_webmap,
             maps_dir=args.maps_dir,
+            tolerance_segments=args.tolerance_segments,
+            tolerance_voronoi=args.tolerance_voronoi,
             min_photos=args.min_photos,
         )
 

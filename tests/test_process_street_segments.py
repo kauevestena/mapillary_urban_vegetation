@@ -176,6 +176,39 @@ def test_generate_line_voronoi_and_attribution_pipeline(tmp_path):
     assert vor0["count"] == 3
     assert vor0["veg_median"] == 25.0
 
+    # Verify that Voronoi polygons cover 100% of the boundary with 0 gaps
+    import shapely
+    diff = boundary.difference(shapely.unary_union(voronoi.geometry))
+    assert diff.area == pytest.approx(0.0, abs=1e-12)
+
+
+def test_generate_line_voronoi_boundary_larger_than_network():
+    # Streets clustered in the center
+    s1 = LineString([(-53.840, -24.290), (-53.840, -24.288)])
+    s2 = LineString([(-53.838, -24.290), (-53.838, -24.288)])
+    segments = gpd.GeoDataFrame({"segment_id": [0, 1], "geometry": [s1, s2]}, crs="EPSG:4326")
+
+    # Boundary extends far outside the street network in all directions
+    boundary = box(-53.890, -24.340, -53.790, -24.240)
+
+    voronoi, _ = pss.generate_line_voronoi(segments, boundary, step=50.0)
+    import shapely
+    diff = boundary.difference(shapely.unary_union(voronoi.geometry))
+    assert diff.area == pytest.approx(0.0, abs=1e-12)
+
+
+def test_fill_boundary_gaps():
+    p1 = Polygon([(0, 0), (5, 0), (5, 10), (0, 10)])
+    p2 = Polygon([(6, 0), (10, 0), (10, 10), (6, 10)])
+    boundary = Polygon([(0, 0), (10, 0), (10, 10), (0, 10)])
+
+    gdf = gpd.GeoDataFrame({"segment_id": [1, 2], "geometry": [p1, p2]}, crs="EPSG:3857")
+    filled = pss.fill_boundary_gaps(gdf, boundary)
+
+    import shapely
+    diff = boundary.difference(shapely.unary_union(filled.geometry))
+    assert diff.area == pytest.approx(0.0, abs=1e-12)
+
 
 def test_export_geojson(tmp_path):
     s = LineString([(0, 0), (1, 1)])
