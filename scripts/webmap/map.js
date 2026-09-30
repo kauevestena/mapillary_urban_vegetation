@@ -21,36 +21,81 @@ const METRIC_CONFIGS = {
 
 const METRIC_PALETTES = {
   percent: {
-    breaks: [10, 20, 30, 40],
-    labels: ["< 10%", "10–20%", "20–30%", "30–40%", "≥ 40%"],
-    ramps: {
-      light: ["#74b85b", "#529e3f", "#378329", "#22691a", "#114f0c"],
-      dark: ["#2f7d2c", "#46983c", "#62b24f", "#82c96a", "#a8dd8f"],
-    },
+    stops: [
+      [0, "#ffffe5"],
+      [5, "#f7fcb9"],
+      [10, "#d9f0a3"],
+      [15, "#addd8e"],
+      [20, "#78c679"],
+      [27, "#41ab5d"],
+      [35, "#238443"],
+      [42, "#006837"],
+      [50, "#004529"],
+    ],
+    gradient: "linear-gradient(to right, #ffffe5, #f7fcb9, #d9f0a3, #addd8e, #78c679, #41ab5d, #238443, #006837, #004529)",
+    ticks: [
+      { pos: "0%", text: "0%" },
+      { pos: "30%", text: "15%" },
+      { pos: "60%", text: "30%" },
+      { pos: "100%", text: "≥ 50%" },
+    ],
   },
   std: {
-    breaks: [5, 10, 15, 20],
-    labels: ["< 5%", "5–10%", "10–15%", "15–20%", "≥ 20%"],
-    ramps: {
-      light: ["#a1dab4", "#41b6c4", "#225ea8", "#253494", "#081d58"],
-      dark: ["#41b6c4", "#6baed6", "#9ecae1", "#c6dbef", "#ffffff"],
-    },
+    stops: [
+      [0, "#ffffd9"],
+      [3, "#edf8b1"],
+      [6, "#c7e9b4"],
+      [9, "#7fcdbb"],
+      [13, "#41b6c4"],
+      [17, "#1d91c0"],
+      [21, "#225ea8"],
+      [25, "#0c2c84"],
+    ],
+    gradient: "linear-gradient(to right, #ffffd9, #edf8b1, #c7e9b4, #7fcdbb, #41b6c4, #1d91c0, #225ea8, #0c2c84)",
+    ticks: [
+      { pos: "0%", text: "0%" },
+      { pos: "36%", text: "9%" },
+      { pos: "68%", text: "17%" },
+      { pos: "100%", text: "≥ 25%" },
+    ],
   },
   count: {
-    breaks: [5, 15, 30, 60],
-    labels: ["1–4", "5–14", "15–29", "30–59", "≥ 60"],
-    ramps: {
-      light: ["#fecc5c", "#fd8d3c", "#f03b20", "#bd0026", "#800026"],
-      dark: ["#feb24c", "#fd8d3c", "#fc4e2a", "#e31a1c", "#b10026"],
-    },
+    stops: [
+      [1, "#ffffb2"],
+      [5, "#fed976"],
+      [15, "#feb24c"],
+      [30, "#fd8d3c"],
+      [50, "#f03b20"],
+      [75, "#bd0026"],
+      [100, "#800026"],
+    ],
+    gradient: "linear-gradient(to right, #ffffb2, #fed976, #feb24c, #fd8d3c, #f03b20, #bd0026, #800026)",
+    ticks: [
+      { pos: "0%", text: "1" },
+      { pos: "30%", text: "30" },
+      { pos: "60%", text: "60" },
+      { pos: "100%", text: "≥ 100" },
+    ],
   },
   height: {
-    breaks: [250, 300, 350, 400],
-    labels: ["< 250m", "250–300m", "300–350m", "350–400m", "≥ 400m"],
-    ramps: {
-      light: ["#c7e9c0", "#74c476", "#31a354", "#006d2c", "#00441b"],
-      dark: ["#238b45", "#41ae76", "#66c2a4", "#99d8c9", "#e5f5f9"],
-    },
+    stops: [
+      [200, "#f7fcf5"],
+      [250, "#e5f5e0"],
+      [300, "#c7e9c0"],
+      [350, "#a1d99b"],
+      [400, "#74c476"],
+      [500, "#41ab5d"],
+      [650, "#238b45"],
+      [800, "#006d2c"],
+      [1000, "#00441b"],
+    ],
+    gradient: "linear-gradient(to right, #f7fcf5, #c7e9c0, #74c476, #31a354, #006d2c, #00441b)",
+    ticks: [
+      { pos: "0%", text: "200m" },
+      { pos: "35%", text: "400m" },
+      { pos: "70%", text: "700m" },
+      { pos: "100%", text: "≥ 1000m" },
+    ],
   },
 };
 
@@ -153,20 +198,32 @@ function setupInfoToggle() {
 // City map
 // ---------------------------------------------------------------------------
 
-function metricColorExpression(metricName, themeName) {
+function metricColorExpression(metricName, themeName, hasCountCheck = true) {
   const config = METRIC_CONFIGS[metricName] || METRIC_CONFIGS.veg_median;
   const palette = METRIC_PALETTES[config.type] || METRIC_PALETTES.percent;
-  const ramp = palette.ramps[themeName];
   const nullColor = UNSURVEYED_COLOR[themeName];
 
-  const stepExpr = ["step", ["to-number", ["get", metricName], -999], ramp[0]];
-  palette.breaks.forEach((limit, i) => stepExpr.push(limit, ramp[i + 1]));
+  const interpExpr = [
+    "interpolate",
+    ["linear"],
+    ["to-number", ["get", metricName], 0],
+  ];
+  palette.stops.forEach(([limit, color]) => interpExpr.push(limit, color));
+
+  if (!hasCountCheck) {
+    return [
+      "case",
+      ["==", ["get", metricName], null],
+      nullColor,
+      interpExpr,
+    ];
+  }
 
   return [
     "case",
     ["any", ["==", ["coalesce", ["get", "count"], 0], 0], ["==", ["get", metricName], null]],
     nullColor,
-    stepExpr,
+    interpExpr,
   ];
 }
 
@@ -175,21 +232,28 @@ function renderLegend(themeName, metricName = "veg_median") {
   if (!legend) return;
   const config = METRIC_CONFIGS[metricName] || METRIC_CONFIGS.veg_median;
   const palette = METRIC_PALETTES[config.type] || METRIC_PALETTES.percent;
-  const ramp = palette.ramps[themeName];
 
   legend.replaceChildren(el("h2", {}, config.label));
-  palette.labels.forEach((label, i) => {
-    const row = el("div", { class: "legend-row" });
-    const swatch = el("span", { class: "legend-swatch" });
-    swatch.style.background = ramp[i];
-    row.append(swatch, el("span", {}, label));
-    legend.appendChild(row);
-  });
 
-  const unRow = el("div", { class: "legend-row" });
-  const unSwatch = el("span", { class: "legend-swatch" });
+  // Continuous gradient bar with ticks (no discrete breaks)
+  const rampBox = el("div", { class: "legend-continuous" });
+  const bar = el("div", { class: "legend-bar" });
+  bar.style.background = palette.gradient;
+  rampBox.appendChild(bar);
+
+  const ticksRow = el("div", { class: "legend-ticks" });
+  palette.ticks.forEach((tick) => {
+    const tickEl = el("span", { class: "legend-tick" }, tick.text);
+    tickEl.style.left = tick.pos;
+    ticksRow.appendChild(tickEl);
+  });
+  rampBox.appendChild(ticksRow);
+  legend.appendChild(rampBox);
+
+  // Unsurveyed street indicator
+  const unRow = el("div", { class: "legend-row legend-unvisited-row" });
+  const unSwatch = el("span", { class: "legend-swatch unvisited" });
   unSwatch.style.background = UNSURVEYED_COLOR[themeName];
-  unSwatch.style.borderStyle = "dashed";
   unRow.append(unSwatch, el("span", { class: "muted" }, "No Mapillary photos"));
   legend.appendChild(unRow);
 }
@@ -401,7 +465,7 @@ async function initCityMap(config) {
         source: "points",
         layout: { visibility: chkPoints && chkPoints.checked ? "visible" : "none" },
         paint: {
-          "circle-color": metricColorExpression("veg", themeName),
+          "circle-color": metricColorExpression("veg", themeName, false),
           "circle-radius": ["interpolate", ["linear"], ["zoom"], 10, 2.5, 14, 4, 17, 7],
           "circle-stroke-color": SURFACES[themeName],
           "circle-stroke-width": ["interpolate", ["linear"], ["zoom"], 10, 0.5, 14, 1, 17, 2],
