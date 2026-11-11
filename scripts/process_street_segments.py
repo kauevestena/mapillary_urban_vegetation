@@ -43,8 +43,8 @@ from shapely.geometry import MultiPoint, box, mapping, shape
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
-# Maximum file size before slicing into .partXXX files (< 100 MB GitHub limit)
-MAX_GITHUB_FILE_BYTES = 90 * 1024 * 1024
+# Maximum file size before slicing into .partXXX files (98 MB limit)
+MAX_GITHUB_FILE_BYTES = 98 * 1000 * 1000
 
 
 def parquet_parts(path):
@@ -648,6 +648,121 @@ def attribute_vegetation_statistics(segments_gdf, voronoi_gdf, points_gdf, utm_c
     return segments_gdf, voronoi_gdf
 
 
+def write_pmtiles_sliced(
+    gdf,
+    path,
+    layer=None,
+    minzoom=9,
+    maxzoom=14,
+    max_bytes=MAX_GITHUB_FILE_BYTES,
+    **kwargs,
+):
+    """Write a GeoDataFrame to PMTiles at `path`, or slice into `<stem>.partXXX.pmtiles` if > max_bytes."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    layer_name = layer or path.stem
+    pm_opts = {
+        "MINZOOM": minzoom,
+        "MAXZOOM": maxzoom,
+        "MAX_SIZE": 5000000,
+        "MAX_FEATURES": 500000,
+        **kwargs,
+    }
+
+    for stale_tmp in path.parent.glob(f"{path.stem}.*.tmp.pmtiles"):
+        stale_tmp.unlink(missing_ok=True)
+
+    tmp_main = path.parent / f"{path.stem}.main.tmp.pmtiles"
+    gdf.to_file(tmp_main, driver="PMTiles", layer=layer_name, **pm_opts)
+    total_size = tmp_main.stat().st_size
+
+    if total_size <= max_bytes or len(gdf) <= 1:
+        for old_part in path.parent.glob(f"{path.stem}.part*{path.suffix}"):
+            old_part.unlink(missing_ok=True)
+        for old_gj in path.parent.glob(f"{path.stem}*.geojson"):
+            old_gj.unlink(missing_ok=True)
+        os.replace(tmp_main, path)
+        return [path]
+
+    tmp_main.unlink(missing_ok=True)
+    # Sort spatially by minx so each PMTiles chunk covers a contiguous region
+    try:
+        order = np.argsort(gdf.geometry.bounds["minx"].values)
+        sorted_gdf = gdf.iloc[order]
+    except Exception:
+        sorted_gdf = gdf
+
+    n_initial = max(2, math.ceil(total_size / (max_bytes * 0.85)))
+    initial_slices = [sorted_gdf.iloc[idx] for idx in np.array_split(np.arange(len(sorted_gdf)), n_initial) if len(idx) > 0]
+
+    chunk_tmps = []
+
+    def _write_chunk(sub_gdf):
+        tmp_chunk = path.parent / f"{path.stem}.chunk_{len(chunk_tmps)}.tmp.pmtiles"
+        sub_gdf.to_file(tmp_chunk, driver="PMTiles", layer=layer_name, **pm_opts)
+        if tmp_chunk.stat().st_size > max_bytes and len(sub_gdf) > 1:
+            tmp_chunk.unlink(missing_ok=True)
+            mid = len(sub_gdf) // 2
+            _write_chunk(sub_gdf.iloc[:mid])
+            _write_chunk(sub_gdf.iloc[mid:])
+        else:
+            chunk_tmps.append(tmp_chunk)
+
+    for sub in initial_slices:
+        _write_chunk(sub)
+
+    path.unlink(missing_ok=True)
+    for old_part in path.parent.glob(f"{path.stem}.part*{path.suffix}"):
+        old_part.unlink(missing_ok=True)
+    for old_gj in path.parent.glob(f"{path.stem}*.geojson"):
+        old_gj.unlink(missing_ok=True)
+
+    written = []
+    for i, tmp_chunk in enumerate(chunk_tmps):
+        part_path = path.parent / f"{path.stem}.part{i:03d}{path.suffix}"
+        os.replace(tmp_chunk, part_path)
+        written.append(part_path)
+    return written
+
+
+def export_pmtiles(
+    gdf,
+    out_path,
+    layer=None,
+    tolerance=0.00002,
+    minzoom=9,
+    maxzoom=14,
+    max_bytes=MAX_GITHUB_FILE_BYTES,
+    **kwargs,
+):
+    """Export GeoDataFrame as PMTiles (or <98 MB .partXXX.pmtiles chunks) with simplified geometries."""
+    out_path = Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    simplified = gdf.copy()
+    if tolerance > 0:
+        geom_types = set(simplified.geometry.geom_type.dropna())
+        if geom_types.issubset({"Polygon", "MultiPolygon"}) and hasattr(shapely, "coverage_simplify"):
+            try:
+                simplified["geometry"] = shapely.coverage_simplify(
+                    simplified.geometry.values, tolerance=tolerance, simplify_boundary=False
+                )
+            except Exception:
+                simplified["geometry"] = simplified.geometry.simplify(tolerance, preserve_topology=True)
+        else:
+            simplified["geometry"] = simplified.geometry.simplify(tolerance, preserve_topology=True)
+
+    return write_pmtiles_sliced(
+        simplified,
+        out_path,
+        layer=layer or out_path.stem,
+        minzoom=minzoom,
+        maxzoom=maxzoom,
+        max_bytes=max_bytes,
+        **kwargs,
+    )
+
+
 def export_geojson(gdf, out_path, tolerance=0.00002, max_bytes=MAX_GITHUB_FILE_BYTES):
     """Export GeoDataFrame as a lightweight GeoJSON file (or <100 MB slices) with simplified geometries."""
     out_path = Path(out_path)
@@ -728,17 +843,17 @@ def process_city(
     print(f"✅ Wrote {', '.join(p.name for p in seg_written)} with joined descriptive statistics.")
     print(f"✅ Wrote {', '.join(p.name for p in vor_written)} with joined descriptive statistics.")
 
-    # Step 6: Optional webmap GeoJSON export
+    # Step 6: Optional webmap PMTiles export
     if export_webmap:
         if maps_dir is None:
             maps_dir = REPO_ROOT / "maps"
         city_maps_dir = Path(maps_dir) / city_dir.name
         city_maps_dir.mkdir(parents=True, exist_ok=True)
 
-        print(f"   Exporting webmap layers to {city_maps_dir}...")
-        export_geojson(segments, city_maps_dir / "segments.geojson", tolerance=tolerance_segments)
-        export_geojson(voronoi, city_maps_dir / "voronoi.geojson", tolerance=tolerance_voronoi)
-        print(f"✅ Webmap layers exported to {city_maps_dir}")
+        print(f"   Exporting webmap PMTiles layers to {city_maps_dir}...")
+        export_pmtiles(segments, city_maps_dir / "segments.pmtiles", layer="segments", tolerance=tolerance_segments)
+        export_pmtiles(voronoi, city_maps_dir / "voronoi.pmtiles", layer="voronoi", tolerance=tolerance_voronoi)
+        print(f"✅ Webmap PMTiles layers exported to {city_maps_dir}")
 
     return {
         "slug": city_dir.name,

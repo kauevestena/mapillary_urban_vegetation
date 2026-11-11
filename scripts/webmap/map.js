@@ -164,7 +164,33 @@ function buildSwitcher(current, onChange) {
   }
 }
 
+let pmtilesProtocol = null;
+
+function ensurePmtilesProtocol() {
+  if (!pmtilesProtocol && typeof pmtiles !== "undefined" && typeof maplibregl !== "undefined") {
+    pmtilesProtocol = new pmtiles.Protocol();
+    maplibregl.addProtocol("pmtiles", pmtilesProtocol.tile);
+  }
+}
+
+function pmtilesUrl(relativePath) {
+  const absUrl = new URL(relativePath, window.location.href).href;
+  return `pmtiles://${absUrl}`;
+}
+
+function pointCoordinates(feature, fallbackLngLat) {
+  const coords = feature && feature.geometry && feature.geometry.coordinates;
+  if (Array.isArray(coords) && coords.length >= 2 && typeof coords[0] === "number") {
+    return [coords[0], coords[1]];
+  }
+  if (Array.isArray(coords) && Array.isArray(coords[0]) && typeof coords[0][0] === "number") {
+    return [coords[0][0], coords[0][1]];
+  }
+  return fallbackLngLat;
+}
+
 function createMap(basemap, options) {
+  ensurePmtilesProtocol();
   const map = new maplibregl.Map({
     container: "map",
     style: BASEMAPS[basemap].url,
@@ -213,6 +239,8 @@ function metricColorExpression(metricName, themeName, hasCountCheck = true) {
   if (!hasCountCheck) {
     return [
       "case",
+      ["!", ["has", metricName]],
+      nullColor,
       ["==", ["get", metricName], null],
       nullColor,
       interpExpr,
@@ -221,7 +249,7 @@ function metricColorExpression(metricName, themeName, hasCountCheck = true) {
 
   return [
     "case",
-    ["any", ["<", ["coalesce", ["get", "count"], 0], 5], ["==", ["get", metricName], null]],
+    ["any", ["<", ["coalesce", ["get", "count"], 0], 5], ["!", ["has", metricName]], ["==", ["get", metricName], null]],
     nullColor,
     interpExpr,
   ];
@@ -353,35 +381,23 @@ async function initCityMap(config) {
   renderLegend(theme(basemap), currentMetric);
   setupInfoToggle();
 
-  const fetchJson = (url) =>
-    fetch(url)
-      .then((r) => (r.ok ? r.json() : null))
-      .catch(() => null);
-
-  async function fetchLayerGeoJson(filesList, fallbackUrl) {
-    const urls = Array.isArray(filesList) ? filesList : (fallbackUrl ? [fallbackUrl] : []);
-    if (urls.length === 0) return null;
-    const parts = await Promise.all(urls.map(fetchJson));
-    const validParts = parts.filter((p) => p && Array.isArray(p.features));
-    if (validParts.length === 0) return null;
-    if (validParts.length === 1) return validParts[0];
-    return {
-      type: "FeatureCollection",
-      features: validParts.flatMap((p) => p.features),
-    };
-  }
-
   const files = config.files || {};
-  const [points, boundary, segments, voronoi] = await Promise.all([
-    fetchLayerGeoJson(files.points, "points.geojson"),
-    fetchJson("boundary.geojson"),
-    fetchLayerGeoJson(files.segments, config.has_segments === false ? [] : "segments.geojson"),
-    fetchLayerGeoJson(files.voronoi, config.has_voronoi === false ? [] : "voronoi.geojson"),
-  ]);
+  const boundaryFiles = Array.isArray(files.boundary) ? files.boundary : ["boundary.pmtiles"];
+  const segmentsFiles = Array.isArray(files.segments)
+    ? files.segments
+    : config.has_segments
+    ? ["segments.pmtiles"]
+    : [];
+  const voronoiFiles = Array.isArray(files.voronoi)
+    ? files.voronoi
+    : config.has_voronoi
+    ? ["voronoi.pmtiles"]
+    : [];
+  const pointsFiles = Array.isArray(files.points) ? files.points : ["points.pmtiles"];
 
-  const hasSegments = !!segments && segments.features && segments.features.length > 0;
-  const hasVoronoi = !!voronoi && voronoi.features && voronoi.features.length > 0;
-  const hasPoints = !!points && points.features && points.features.length > 0;
+  const hasSegments = segmentsFiles.length > 0;
+  const hasVoronoi = voronoiFiles.length > 0;
+  const hasPoints = pointsFiles.length > 0;
 
   // Setup layer checkboxes
   const chkSegments = document.getElementById("layer-segments");
@@ -405,93 +421,131 @@ async function initCityMap(config) {
   const map = createMap(basemap, { bounds: config.bounds, fitBoundsOptions: { padding: 40 } });
   map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "bottom-right");
 
+  const boundaryLayerIds = boundaryFiles.map((_, i) => `boundary-line-${i}`);
+  const voronoiFillLayerIds = voronoiFiles.map((_, i) => `voronoi-fill-${i}`);
+  const voronoiLineLayerIds = voronoiFiles.map((_, i) => `voronoi-line-${i}`);
+  const segmentsLayerIds = segmentsFiles.map((_, i) => `segments-line-${i}`);
+  const pointsLayerIds = pointsFiles.map((_, i) => `points-${i}`);
+
   function addLayers() {
     const themeName = theme(basemap);
 
-    if (boundary && !map.getSource("boundary")) {
-      map.addSource("boundary", { type: "geojson", data: boundary });
-      map.addLayer({
-        id: "boundary-line",
-        type: "line",
-        source: "boundary",
-        paint: {
-          "line-color": themeName === "dark" ? "#c3c2b7" : "#52514e",
-          "line-width": 1.5,
-          "line-opacity": 0.7,
-          "line-dasharray": [3, 2],
-        },
-      });
-    }
+    boundaryFiles.forEach((file, i) => {
+      const srcId = `boundary-${i}`;
+      const lyrId = boundaryLayerIds[i];
+      if (!map.getSource(srcId)) {
+        map.addSource(srcId, { type: "vector", url: pmtilesUrl(file) });
+      }
+      if (!map.getLayer(lyrId)) {
+        map.addLayer({
+          id: lyrId,
+          type: "line",
+          source: srcId,
+          "source-layer": "boundary",
+          paint: {
+            "line-color": themeName === "dark" ? "#c3c2b7" : "#52514e",
+            "line-width": 1.5,
+            "line-opacity": 0.7,
+            "line-dasharray": [3, 2],
+          },
+        });
+      }
+    });
 
-    if (hasVoronoi && !map.getSource("voronoi")) {
-      map.addSource("voronoi", { type: "geojson", data: voronoi });
-      map.addLayer({
-        id: "voronoi-fill",
-        type: "fill",
-        source: "voronoi",
-        layout: { visibility: chkVoronoi && chkVoronoi.checked ? "visible" : "none" },
-        paint: {
-          "fill-color": metricColorExpression(currentMetric, themeName),
-          "fill-opacity": [
-            "case",
-            ["<", ["coalesce", ["get", "count"], 0], 5],
-            0.05,
-            0.35,
-          ],
-        },
-      });
-      map.addLayer({
-        id: "voronoi-line",
-        type: "line",
-        source: "voronoi",
-        layout: { visibility: chkVoronoi && chkVoronoi.checked ? "visible" : "none" },
-        paint: {
-          "line-color": themeName === "dark" ? "#666660" : "#999990",
-          "line-width": 0.6,
-          "line-opacity": 0.4,
-        },
-      });
-    }
+    voronoiFiles.forEach((file, i) => {
+      const srcId = `voronoi-${i}`;
+      const fillId = voronoiFillLayerIds[i];
+      const lineId = voronoiLineLayerIds[i];
+      if (!map.getSource(srcId)) {
+        map.addSource(srcId, { type: "vector", url: pmtilesUrl(file) });
+      }
+      if (!map.getLayer(fillId)) {
+        map.addLayer({
+          id: fillId,
+          type: "fill",
+          source: srcId,
+          "source-layer": "voronoi",
+          layout: { visibility: chkVoronoi && chkVoronoi.checked ? "visible" : "none" },
+          paint: {
+            "fill-color": metricColorExpression(currentMetric, themeName),
+            "fill-opacity": [
+              "case",
+              ["<", ["coalesce", ["get", "count"], 0], 5],
+              0.05,
+              0.35,
+            ],
+          },
+        });
+      }
+      if (!map.getLayer(lineId)) {
+        map.addLayer({
+          id: lineId,
+          type: "line",
+          source: srcId,
+          "source-layer": "voronoi",
+          layout: { visibility: chkVoronoi && chkVoronoi.checked ? "visible" : "none" },
+          paint: {
+            "line-color": themeName === "dark" ? "#666660" : "#999990",
+            "line-width": 0.6,
+            "line-opacity": 0.4,
+          },
+        });
+      }
+    });
 
-    if (hasSegments && !map.getSource("segments")) {
-      map.addSource("segments", { type: "geojson", data: segments });
-      map.addLayer({
-        id: "segments-line",
-        type: "line",
-        source: "segments",
-        layout: {
-          visibility: chkSegments && chkSegments.checked ? "visible" : "none",
-          "line-cap": "round",
-          "line-join": "round",
-        },
-        paint: {
-          "line-color": metricColorExpression(currentMetric, themeName),
-          "line-width": ["interpolate", ["linear"], ["zoom"], 10, 1.5, 13, 2.5, 15, 4.5, 17, 7.5],
-          "line-opacity": [
-            "case",
-            ["<", ["coalesce", ["get", "count"], 0], 5],
-            0.35,
-            0.95,
-          ],
-        },
-      });
-    }
+    segmentsFiles.forEach((file, i) => {
+      const srcId = `segments-${i}`;
+      const lyrId = segmentsLayerIds[i];
+      if (!map.getSource(srcId)) {
+        map.addSource(srcId, { type: "vector", url: pmtilesUrl(file) });
+      }
+      if (!map.getLayer(lyrId)) {
+        map.addLayer({
+          id: lyrId,
+          type: "line",
+          source: srcId,
+          "source-layer": "segments",
+          layout: {
+            visibility: chkSegments && chkSegments.checked ? "visible" : "none",
+            "line-cap": "round",
+            "line-join": "round",
+          },
+          paint: {
+            "line-color": metricColorExpression(currentMetric, themeName),
+            "line-width": ["interpolate", ["linear"], ["zoom"], 10, 1.5, 13, 2.5, 15, 4.5, 17, 7.5],
+            "line-opacity": [
+              "case",
+              ["<", ["coalesce", ["get", "count"], 0], 5],
+              0.35,
+              0.95,
+            ],
+          },
+        });
+      }
+    });
 
-    if (hasPoints && !map.getSource("points")) {
-      map.addSource("points", { type: "geojson", data: points });
-      map.addLayer({
-        id: "points",
-        type: "circle",
-        source: "points",
-        layout: { visibility: chkPoints && chkPoints.checked ? "visible" : "none" },
-        paint: {
-          "circle-color": metricColorExpression("veg", themeName, false),
-          "circle-radius": ["interpolate", ["linear"], ["zoom"], 10, 2.5, 14, 4, 17, 7],
-          "circle-stroke-color": SURFACES[themeName],
-          "circle-stroke-width": ["interpolate", ["linear"], ["zoom"], 10, 0.5, 14, 1, 17, 2],
-        },
-      });
-    }
+    pointsFiles.forEach((file, i) => {
+      const srcId = `points-${i}`;
+      const lyrId = pointsLayerIds[i];
+      if (!map.getSource(srcId)) {
+        map.addSource(srcId, { type: "vector", url: pmtilesUrl(file) });
+      }
+      if (!map.getLayer(lyrId)) {
+        map.addLayer({
+          id: lyrId,
+          type: "circle",
+          source: srcId,
+          "source-layer": "points",
+          layout: { visibility: chkPoints && chkPoints.checked ? "visible" : "none" },
+          paint: {
+            "circle-color": metricColorExpression("veg", themeName, false),
+            "circle-radius": ["interpolate", ["linear"], ["zoom"], 10, 2.5, 14, 4, 17, 7],
+            "circle-stroke-color": SURFACES[themeName],
+            "circle-stroke-width": ["interpolate", ["linear"], ["zoom"], 10, 0.5, 14, 1, 17, 2],
+          },
+        });
+      }
+    });
   }
 
   map.on("style.load", addLayers);
@@ -500,11 +554,11 @@ async function initCityMap(config) {
   function updateMetricStyles() {
     const themeName = theme(basemap);
     const expr = metricColorExpression(currentMetric, themeName);
-    if (map.getLayer("segments-line")) {
-      map.setPaintProperty("segments-line", "line-color", expr);
+    for (const lyrId of segmentsLayerIds) {
+      if (map.getLayer(lyrId)) map.setPaintProperty(lyrId, "line-color", expr);
     }
-    if (map.getLayer("voronoi-fill")) {
-      map.setPaintProperty("voronoi-fill", "fill-color", expr);
+    for (const lyrId of voronoiFillLayerIds) {
+      if (map.getLayer(lyrId)) map.setPaintProperty(lyrId, "fill-color", expr);
     }
     renderLegend(themeName, currentMetric);
   }
@@ -519,22 +573,28 @@ async function initCityMap(config) {
   // Layer toggle event listeners
   if (chkSegments) {
     chkSegments.addEventListener("change", (e) => {
-      if (map.getLayer("segments-line")) {
-        map.setLayoutProperty("segments-line", "visibility", e.target.checked ? "visible" : "none");
+      const vis = e.target.checked ? "visible" : "none";
+      for (const lyrId of segmentsLayerIds) {
+        if (map.getLayer(lyrId)) map.setLayoutProperty(lyrId, "visibility", vis);
       }
     });
   }
   if (chkVoronoi) {
     chkVoronoi.addEventListener("change", (e) => {
       const vis = e.target.checked ? "visible" : "none";
-      if (map.getLayer("voronoi-fill")) map.setLayoutProperty("voronoi-fill", "visibility", vis);
-      if (map.getLayer("voronoi-line")) map.setLayoutProperty("voronoi-line", "visibility", vis);
+      for (const lyrId of voronoiFillLayerIds) {
+        if (map.getLayer(lyrId)) map.setLayoutProperty(lyrId, "visibility", vis);
+      }
+      for (const lyrId of voronoiLineLayerIds) {
+        if (map.getLayer(lyrId)) map.setLayoutProperty(lyrId, "visibility", vis);
+      }
     });
   }
   if (chkPoints) {
     chkPoints.addEventListener("change", (e) => {
-      if (map.getLayer("points")) {
-        map.setLayoutProperty("points", "visibility", e.target.checked ? "visible" : "none");
+      const vis = e.target.checked ? "visible" : "none";
+      for (const lyrId of pointsLayerIds) {
+        if (map.getLayer(lyrId)) map.setLayoutProperty(lyrId, "visibility", vis);
       }
     });
   }
@@ -542,66 +602,74 @@ async function initCityMap(config) {
   // Interactive Popups
   const hoverPopup = new maplibregl.Popup({ closeButton: false, closeOnClick: false, offset: 8 });
 
-  // Hover on segments
-  map.on("mousemove", "segments-line", (e) => {
-    map.getCanvas().style.cursor = "pointer";
-    const feat = e.features[0];
-    hoverPopup.setLngLat(e.lngLat).setDOMContent(segmentPopupContent(feat.properties, currentMetric)).addTo(map);
-  });
-  map.on("mouseleave", "segments-line", () => {
-    map.getCanvas().style.cursor = "";
-    hoverPopup.remove();
-  });
-  map.on("click", "segments-line", (e) => {
-    hoverPopup.remove();
-    const feat = e.features[0];
-    new maplibregl.Popup({ offset: 8 })
-      .setLngLat(e.lngLat)
-      .setDOMContent(segmentPopupContent(feat.properties, currentMetric))
-      .addTo(map);
-  });
+  // Hover and click on segments
+  for (const lyrId of segmentsLayerIds) {
+    map.on("mousemove", lyrId, (e) => {
+      map.getCanvas().style.cursor = "pointer";
+      const feat = e.features[0];
+      hoverPopup.setLngLat(e.lngLat).setDOMContent(segmentPopupContent(feat.properties, currentMetric)).addTo(map);
+    });
+    map.on("mouseleave", lyrId, () => {
+      map.getCanvas().style.cursor = "";
+      hoverPopup.remove();
+    });
+    map.on("click", lyrId, (e) => {
+      hoverPopup.remove();
+      const feat = e.features[0];
+      new maplibregl.Popup({ offset: 8 })
+        .setLngLat(e.lngLat)
+        .setDOMContent(segmentPopupContent(feat.properties, currentMetric))
+        .addTo(map);
+    });
+  }
 
-  // Click on Voronoi polygons
-  map.on("mousemove", "voronoi-fill", (e) => {
-    // If segments line is visible and hovered, segments take priority
-    if (chkSegments && chkSegments.checked) return;
-    map.getCanvas().style.cursor = "pointer";
-    const feat = e.features[0];
-    hoverPopup.setLngLat(e.lngLat).setDOMContent(segmentPopupContent(feat.properties, currentMetric)).addTo(map);
-  });
-  map.on("mouseleave", "voronoi-fill", () => {
-    if (chkSegments && chkSegments.checked) return;
-    map.getCanvas().style.cursor = "";
-    hoverPopup.remove();
-  });
-  map.on("click", "voronoi-fill", (e) => {
-    if (chkSegments && chkSegments.checked) return;
-    hoverPopup.remove();
-    const feat = e.features[0];
-    new maplibregl.Popup({ offset: 8 })
-      .setLngLat(e.lngLat)
-      .setDOMContent(segmentPopupContent(feat.properties, currentMetric))
-      .addTo(map);
-  });
+  // Hover and click on Voronoi polygons
+  for (const lyrId of voronoiFillLayerIds) {
+    map.on("mousemove", lyrId, (e) => {
+      if (chkSegments && chkSegments.checked) return;
+      map.getCanvas().style.cursor = "pointer";
+      const feat = e.features[0];
+      hoverPopup.setLngLat(e.lngLat).setDOMContent(segmentPopupContent(feat.properties, currentMetric)).addTo(map);
+    });
+    map.on("mouseleave", lyrId, () => {
+      if (chkSegments && chkSegments.checked) return;
+      map.getCanvas().style.cursor = "";
+      hoverPopup.remove();
+    });
+    map.on("click", lyrId, (e) => {
+      if (chkSegments && chkSegments.checked) return;
+      hoverPopup.remove();
+      const feat = e.features[0];
+      new maplibregl.Popup({ offset: 8 })
+        .setLngLat(e.lngLat)
+        .setDOMContent(segmentPopupContent(feat.properties, currentMetric))
+        .addTo(map);
+    });
+  }
 
   // Points popups
-  map.on("mousemove", "points", (event) => {
-    map.getCanvas().style.cursor = "pointer";
-    const feature = event.features[0];
-    hoverPopup.setLngLat(feature.geometry.coordinates).setDOMContent(pointPopupContent(feature.properties, false)).addTo(map);
-  });
-  map.on("mouseleave", "points", () => {
-    map.getCanvas().style.cursor = "";
-    hoverPopup.remove();
-  });
-  map.on("click", "points", (event) => {
-    hoverPopup.remove();
-    const feature = event.features[0];
-    new maplibregl.Popup({ offset: 8 })
-      .setLngLat(feature.geometry.coordinates)
-      .setDOMContent(pointPopupContent(feature.properties, true))
-      .addTo(map);
-  });
+  for (const lyrId of pointsLayerIds) {
+    map.on("mousemove", lyrId, (event) => {
+      map.getCanvas().style.cursor = "pointer";
+      const feature = event.features[0];
+      hoverPopup
+        .setLngLat(pointCoordinates(feature, event.lngLat))
+        .setDOMContent(pointPopupContent(feature.properties, false))
+        .addTo(map);
+    });
+    map.on("mouseleave", lyrId, () => {
+      map.getCanvas().style.cursor = "";
+      hoverPopup.remove();
+    });
+    map.on("click", lyrId, (event) => {
+      hoverPopup.remove();
+      const feature = event.features[0];
+      new maplibregl.Popup({ offset: 8 })
+        .setLngLat(pointCoordinates(feature, event.lngLat))
+        .setDOMContent(pointPopupContent(feature.properties, true))
+        .addTo(map);
+    });
+  }
 
   buildSwitcher(basemap, (name) => {
     basemap = name;
@@ -637,10 +705,7 @@ async function initIndexMap() {
   applyTheme(basemap);
   setupInfoToggle();
 
-  const [cities, boundaries] = await Promise.all([
-    fetch("cities.json").then((r) => r.json()),
-    fetch("cities.geojson").then((r) => r.json()),
-  ]);
+  const cities = await fetch("cities.json").then((r) => r.json());
   renderCityList(cities);
 
   const options = {};
@@ -660,9 +725,27 @@ async function initIndexMap() {
 
   function addLayers() {
     const accent = theme(basemap) === "dark" ? "#82c96a" : "#22691a";
-    if (!map.getSource("cities")) map.addSource("cities", { type: "geojson", data: boundaries });
-    map.addLayer({ id: "cities-fill", type: "fill", source: "cities", paint: { "fill-color": accent, "fill-opacity": 0.15 } });
-    map.addLayer({ id: "cities-line", type: "line", source: "cities", paint: { "line-color": accent, "line-width": 2 } });
+    if (!map.getSource("cities")) {
+      map.addSource("cities", { type: "vector", url: pmtilesUrl("cities.pmtiles") });
+    }
+    if (!map.getLayer("cities-fill")) {
+      map.addLayer({
+        id: "cities-fill",
+        type: "fill",
+        source: "cities",
+        "source-layer": "cities",
+        paint: { "fill-color": accent, "fill-opacity": 0.15 },
+      });
+    }
+    if (!map.getLayer("cities-line")) {
+      map.addLayer({
+        id: "cities-line",
+        type: "line",
+        source: "cities",
+        "source-layer": "cities",
+        paint: { "line-color": accent, "line-width": 2 },
+      });
+    }
   }
   map.on("style.load", addLayers);
 

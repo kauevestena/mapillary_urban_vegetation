@@ -25,6 +25,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import geopandas as gpd
+import numpy as np
 import pandas as pd
 from shapely.geometry import mapping, shape
 
@@ -38,8 +39,8 @@ GENERATED_MARKER = ".generated"
 CITY_BOUNDARY_TOLERANCE = 0.00005
 INDEX_BOUNDARY_TOLERANCE = 0.0005
 
-# Maximum file size before slicing into .partXXX files (< 100 MB GitHub limit)
-MAX_GITHUB_FILE_BYTES = 90 * 1024 * 1024
+# Maximum file size before slicing into .partXXX files (98 MB limit)
+MAX_GITHUB_FILE_BYTES = 98 * 1000 * 1000
 
 
 def parquet_parts(path):
@@ -129,6 +130,85 @@ def write_geojson_sliced(data, path, max_bytes=MAX_GITHUB_FILE_BYTES):
     return written_names
 
 
+def write_pmtiles_sliced(
+    gdf,
+    path,
+    layer=None,
+    minzoom=9,
+    maxzoom=14,
+    max_bytes=MAX_GITHUB_FILE_BYTES,
+    **kwargs,
+):
+    """Write a GeoDataFrame to PMTiles at `path`, or slice into `<stem>.partXXX.pmtiles` if > max_bytes.
+
+    Returns the list of written filenames (relative to `path.parent`).
+    """
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    layer_name = layer or path.stem
+    pm_opts = {
+        "MINZOOM": minzoom,
+        "MAXZOOM": maxzoom,
+        "MAX_SIZE": 5000000,
+        "MAX_FEATURES": 500000,
+        **kwargs,
+    }
+
+    for stale_tmp in path.parent.glob(f"{path.stem}.*.tmp.pmtiles"):
+        stale_tmp.unlink(missing_ok=True)
+
+    tmp_main = path.parent / f"{path.stem}.main.tmp.pmtiles"
+    gdf.to_file(tmp_main, driver="PMTiles", layer=layer_name, **pm_opts)
+    total_size = tmp_main.stat().st_size
+
+    if total_size <= max_bytes or len(gdf) <= 1:
+        for old_part in path.parent.glob(f"{path.stem}.part*{path.suffix}"):
+            old_part.unlink(missing_ok=True)
+        for old_gj in path.parent.glob(f"{path.stem}*.geojson"):
+            old_gj.unlink(missing_ok=True)
+        os.replace(tmp_main, path)
+        return [path.name]
+
+    tmp_main.unlink(missing_ok=True)
+    try:
+        order = np.argsort(gdf.geometry.bounds["minx"].values)
+        sorted_gdf = gdf.iloc[order]
+    except Exception:
+        sorted_gdf = gdf
+
+    n_initial = max(2, math.ceil(total_size / (max_bytes * 0.85)))
+    initial_slices = [sorted_gdf.iloc[idx] for idx in np.array_split(np.arange(len(sorted_gdf)), n_initial) if len(idx) > 0]
+
+    chunk_tmps = []
+
+    def _write_chunk(sub_gdf):
+        tmp_chunk = path.parent / f"{path.stem}.chunk_{len(chunk_tmps)}.tmp.pmtiles"
+        sub_gdf.to_file(tmp_chunk, driver="PMTiles", layer=layer_name, **pm_opts)
+        if tmp_chunk.stat().st_size > max_bytes and len(sub_gdf) > 1:
+            tmp_chunk.unlink(missing_ok=True)
+            mid = len(sub_gdf) // 2
+            _write_chunk(sub_gdf.iloc[:mid])
+            _write_chunk(sub_gdf.iloc[mid:])
+        else:
+            chunk_tmps.append(tmp_chunk)
+
+    for sub in initial_slices:
+        _write_chunk(sub)
+
+    path.unlink(missing_ok=True)
+    for old_part in path.parent.glob(f"{path.stem}.part*{path.suffix}"):
+        old_part.unlink(missing_ok=True)
+    for old_gj in path.parent.glob(f"{path.stem}*.geojson"):
+        old_gj.unlink(missing_ok=True)
+
+    written_names = []
+    for i, tmp_chunk in enumerate(chunk_tmps):
+        part_path = path.parent / f"{path.stem}.part{i:03d}{path.suffix}"
+        os.replace(tmp_chunk, part_path)
+        written_names.append(part_path.name)
+    return written_names
+
+
 def _round(value, digits):
     if value is None or (isinstance(value, float) and math.isnan(value)):
         return None
@@ -200,6 +280,17 @@ def points_geojson(points):
     return {"type": "FeatureCollection", "features": features}
 
 
+def points_gdf(points):
+    df = pd.DataFrame({
+        "id": points["id"].astype(str),
+        "veg": pd.to_numeric(points["vegetation_percent"], errors="coerce").round(1),
+        "date": pd.to_datetime(points["captured_at"], utc=True, errors="coerce").dt.strftime("%Y-%m-%d"),
+        "h": pd.to_numeric(points["h"], errors="coerce").round(1) if "h" in points.columns else np.nan,
+    })
+    geom = points["geometry"] if "geometry" in points.columns else gpd.points_from_xy(points["lon"], points["lat"])
+    return gpd.GeoDataFrame(df, geometry=geom, crs="EPSG:4326")
+
+
 def render(template_name, replacements):
     text = (TEMPLATES / template_name).read_text(encoding="utf-8")
     for key, value in replacements.items():
@@ -212,7 +303,15 @@ def config_json(config):
     return json.dumps(config, ensure_ascii=False).replace("</", "<\\/")
 
 
-def build_city(city, out_dir, max_bytes=MAX_GITHUB_FILE_BYTES):
+def pmtiles_parts(path):
+    """Return existing filename(s) for a logical PMTiles path (single file or .partXXX slices)."""
+    path = Path(path)
+    if path.exists():
+        return [path.name]
+    return [p.name for p in sorted(path.parent.glob(f"{path.stem}.part*{path.suffix}"))]
+
+
+def build_city(city, out_dir, max_bytes=MAX_GITHUB_FILE_BYTES, reuse_pmtiles=False):
     city_out = out_dir / city["slug"]
     city_out.mkdir(parents=True, exist_ok=True)
     (city_out / GENERATED_MARKER).write_text("generated by scripts/build_webmaps.py\n", encoding="utf-8")
@@ -229,22 +328,33 @@ def build_city(city, out_dir, max_bytes=MAX_GITHUB_FILE_BYTES):
     if city_dir:
         seg_file = city_dir / "segments.parquet"
         vor_file = city_dir / "voronoi.parquet"
-        if parquet_exists(seg_file):
+        existing_seg_pm = pmtiles_parts(city_out / "segments.pmtiles") if reuse_pmtiles else []
+        if existing_seg_pm:
+            segments_files = existing_seg_pm
+            has_segments = True
+        elif parquet_exists(seg_file):
             try:
                 segs = read_parquet_sliced(seg_file)
                 if not segs.empty:
                     segs_simple = segs.copy()
                     segs_simple["geometry"] = segs_simple.geometry.simplify(0.00002, preserve_topology=True)
-                    segments_files = write_geojson_sliced(
-                        json.loads(segs_simple.to_json(drop_id=True)),
-                        city_out / "segments.geojson",
+                    segments_files = write_pmtiles_sliced(
+                        segs_simple,
+                        city_out / "segments.pmtiles",
+                        layer="segments",
+                        minzoom=9,
+                        maxzoom=14,
                         max_bytes=max_bytes,
                     )
                     has_segments = True
             except Exception as e:
-                print(f"   warning: failed to write segments.geojson: {e}")
+                print(f"   warning: failed to write segments.pmtiles: {e}")
 
-        if parquet_exists(vor_file):
+        existing_vor_pm = pmtiles_parts(city_out / "voronoi.pmtiles") if reuse_pmtiles else []
+        if existing_vor_pm:
+            voronoi_files = existing_vor_pm
+            has_voronoi = True
+        elif parquet_exists(vor_file):
             try:
                 vor = read_parquet_sliced(vor_file)
                 if not vor.empty:
@@ -260,20 +370,49 @@ def build_city(city, out_dir, max_bytes=MAX_GITHUB_FILE_BYTES):
                         vor_out["geometry"] = sim
                     else:
                         vor_out = vor
-                    voronoi_files = write_geojson_sliced(
-                        json.loads(vor_out.to_json(drop_id=True)),
-                        city_out / "voronoi.geojson",
+                    voronoi_files = write_pmtiles_sliced(
+                        vor_out,
+                        city_out / "voronoi.pmtiles",
+                        layer="voronoi",
+                        minzoom=9,
+                        maxzoom=14,
                         max_bytes=max_bytes,
                     )
                     has_voronoi = True
             except Exception as e:
-                print(f"   warning: failed to write voronoi.geojson: {e}")
+                print(f"   warning: failed to write voronoi.pmtiles: {e}")
 
-    points_files = write_geojson_sliced(
-        points_geojson(city["points"]),
-        city_out / "points.geojson",
-        max_bytes=max_bytes,
-    )
+    existing_pts_pm = pmtiles_parts(city_out / "points.pmtiles") if reuse_pmtiles else []
+    if existing_pts_pm:
+        points_files = existing_pts_pm
+    else:
+        points_files = write_pmtiles_sliced(
+            points_gdf(city["points"]),
+            city_out / "points.pmtiles",
+            layer="points",
+            minzoom=10,
+            maxzoom=13,
+            EXTENT=8192,
+            max_bytes=max_bytes,
+        )
+
+    existing_bnd_pm = pmtiles_parts(city_out / "boundary.pmtiles") if reuse_pmtiles else []
+    if existing_bnd_pm:
+        boundary_files = existing_bnd_pm
+    else:
+        boundary_gdf = gpd.GeoDataFrame(
+            {"slug": [city["slug"]], "name": [city["name"]]},
+            geometry=[boundary.boundary],
+            crs="EPSG:4326",
+        )
+        boundary_files = write_pmtiles_sliced(
+            boundary_gdf,
+            city_out / "boundary.pmtiles",
+            layer="boundary",
+            minzoom=6,
+            maxzoom=14,
+            max_bytes=max_bytes,
+        )
 
     config = {
         "slug": city["slug"],
@@ -287,13 +426,10 @@ def build_city(city, out_dir, max_bytes=MAX_GITHUB_FILE_BYTES):
             "points": points_files,
             "segments": segments_files,
             "voronoi": voronoi_files,
+            "boundary": boundary_files,
         },
     }
 
-    write_json(
-        {"type": "FeatureCollection", "features": [{"type": "Feature", "properties": {}, "geometry": mapping(boundary)}]},
-        city_out / "boundary.geojson",
-    )
     (city_out / "index.html").write_text(
         render("city.html", {"__TITLE__": html.escape(city["name"]), "__CONFIG__": config_json(config)}),
         encoding="utf-8",
@@ -303,22 +439,22 @@ def build_city(city, out_dir, max_bytes=MAX_GITHUB_FILE_BYTES):
     return {**config, "center": [round(center.x, 6), round(center.y, 6)]}
 
 
-def build(data_dir, out_dir, max_bytes=MAX_GITHUB_FILE_BYTES):
+def build(data_dir, out_dir, max_bytes=MAX_GITHUB_FILE_BYTES, reuse_pmtiles=False):
     data_dir, out_dir = Path(data_dir), Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    entries, index_features = [], []
+    entries, index_rows = [], []
     for city_dir in sorted(p for p in data_dir.iterdir() if p.is_dir()) if data_dir.exists() else []:
         city = load_city(city_dir)
         if city is None:
             print(f"   {city_dir.name}: no data yet, skipped")
             continue
-        entry = build_city(city, out_dir, max_bytes=max_bytes)
+        entry = build_city(city, out_dir, max_bytes=max_bytes, reuse_pmtiles=reuse_pmtiles)
         entries.append(entry)
-        index_features.append({
-            "type": "Feature",
-            "properties": {"slug": entry["slug"], "name": entry["name"]},
-            "geometry": mapping(city["boundary"].simplify(INDEX_BOUNDARY_TOLERANCE, preserve_topology=True)),
+        index_rows.append({
+            "slug": entry["slug"],
+            "name": entry["name"],
+            "geometry": city["boundary"].simplify(INDEX_BOUNDARY_TOLERANCE, preserve_topology=True),
         })
         print(f"🗺️  {entry['slug']}: {entry['stats']['images']} images")
 
@@ -335,7 +471,23 @@ def build(data_dir, out_dir, max_bytes=MAX_GITHUB_FILE_BYTES):
         shutil.copyfile(TEMPLATES / name, assets / name)
 
     write_json(entries, out_dir / "cities.json")
-    write_json({"type": "FeatureCollection", "features": index_features}, out_dir / "cities.geojson")
+    if index_rows:
+        if not (reuse_pmtiles and pmtiles_parts(out_dir / "cities.pmtiles")):
+            cities_gdf = gpd.GeoDataFrame(index_rows, geometry="geometry", crs="EPSG:4326")
+            write_pmtiles_sliced(
+                cities_gdf,
+                out_dir / "cities.pmtiles",
+                layer="cities",
+                minzoom=0,
+                maxzoom=10,
+                max_bytes=max_bytes,
+            )
+    else:
+        (out_dir / "cities.pmtiles").unlink(missing_ok=True)
+        for old_p in out_dir.glob("cities.part*.pmtiles"):
+            old_p.unlink(missing_ok=True)
+        (out_dir / "cities.geojson").unlink(missing_ok=True)
+
     updated = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     (out_dir / "index.html").write_text(render("index.html", {"__UPDATED__": updated}), encoding="utf-8")
     print(f"✅ {len(entries)} city maps and the index written to {out_dir}")
@@ -346,8 +498,13 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--data-dir", default=str(REPO_ROOT / "data"), help="Fetched data (default: data/)")
     parser.add_argument("--out", default=str(REPO_ROOT / "maps"), help="Output folder of the site (default: maps/)")
+    parser.add_argument(
+        "--reuse-pmtiles",
+        action="store_true",
+        help="Reuse existing .pmtiles files in maps/ if present instead of re-encoding them",
+    )
     args = parser.parse_args(argv)
-    build(args.data_dir, args.out)
+    build(args.data_dir, args.out, reuse_pmtiles=args.reuse_pmtiles)
 
 
 if __name__ == "__main__":

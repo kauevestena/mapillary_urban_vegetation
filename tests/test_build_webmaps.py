@@ -56,16 +56,22 @@ def test_build(tmp_path, capsys):
     assert "empty-city: no data yet" in capsys.readouterr().out
 
     city = out / "test-city"
-    points = json.loads((city / "points.geojson").read_text())
-    assert len(points["features"]) == 2
-    first = points["features"][0]
-    assert first["properties"] == {"id": "1", "veg": 12.3, "date": "2025-06-07", "h": 931.0}
-    assert points["features"][1]["properties"]["h"] is None  # NaN height
-    assert json.loads((city / "boundary.geojson").read_text())["features"][0]["geometry"]["type"] == "Polygon"
+    points = gpd.read_file(city / "points.pmtiles")
+    assert len(points) == 2
+    first = points[points["id"] == "1"].iloc[0]
+    assert first["veg"] == 12.3
+    assert first["date"] == "2025-06-07"
+    assert first["h"] == 931.0
+    second = points[points["id"] == "2"].iloc[0]
+    assert pd.isna(second["h"])  # NaN height
+    boundary_gdf = gpd.read_file(city / "boundary.pmtiles")
+    assert not boundary_gdf.empty
+    assert set(boundary_gdf["slug"]) == {"test-city"}
+    assert all(boundary_gdf.geometry.geom_type.isin(["LineString", "MultiLineString"]))
 
     page = (city / "index.html").read_text()
     assert "<title>Test City · Urban vegetation</title>" in page
-    assert "../assets/map.js" in page and "initCityMap" in page
+    assert "../assets/map.js" in page and "initCityMap" in page and "pmtiles.js" in page
     config = json.loads(page.split('id="config">')[1].split("</script>")[0])
     assert config["stats"] == {
         "images": 2, "vegetation_median": 26.2, "vegetation_mean": 26.2,
@@ -75,8 +81,8 @@ def test_build(tmp_path, capsys):
 
     cities = json.loads((out / "cities.json").read_text())
     assert [c["name"] for c in cities] == ["Test City"] and len(cities[0]["center"]) == 2
-    index_boundaries = json.loads((out / "cities.geojson").read_text())
-    assert index_boundaries["features"][0]["properties"]["slug"] == "test-city"
+    index_boundaries = gpd.read_file(out / "cities.pmtiles")
+    assert index_boundaries.iloc[0]["slug"] == "test-city"
     assert "initIndexMap" in (out / "index.html").read_text()
 
     script = (out / "assets" / "map.js").read_text()
@@ -124,62 +130,64 @@ def test_build_with_segments_and_voronoi(tmp_path):
     bw.build(data, out)
 
     city_out = out / "geo-city"
-    assert (city_out / "segments.geojson").exists()
-    assert (city_out / "voronoi.geojson").exists()
-    assert (city_out / "points.geojson").exists()
+    assert (city_out / "segments.pmtiles").exists()
+    assert (city_out / "voronoi.pmtiles").exists()
+    assert (city_out / "points.pmtiles").exists()
+    assert (city_out / "boundary.pmtiles").exists()
 
     config = json.loads((city_out / "index.html").read_text().split('id="config">')[1].split("</script>")[0])
     assert config["has_segments"] is True
     assert config["has_voronoi"] is True
     assert config["files"] == {
-        "points": ["points.geojson"],
-        "segments": ["segments.geojson"],
-        "voronoi": ["voronoi.geojson"],
+        "points": ["points.pmtiles"],
+        "segments": ["segments.pmtiles"],
+        "voronoi": ["voronoi.pmtiles"],
+        "boundary": ["boundary.pmtiles"],
     }
 
 
-def test_build_with_sliced_parquet_and_sliced_geojson(tmp_path):
+def test_build_with_sliced_parquet_and_sliced_pmtiles(tmp_path):
     from shapely.geometry import LineString, Polygon
     data, out = tmp_path / "data", tmp_path / "maps"
     many_rows = [
         {
             "id": str(i),
             "captured_at": 1749300000000 + i * 1000,
-            "lon": -49.25 + i * 0.001,
-            "lat": -25.45 + i * 0.001,
+            "lon": -49.28 + i * 0.005,
+            "lat": -25.48 + i * 0.005,
             "h": 900.0 + i,
             "h_computed": 1.0,
             "vegetation_percent": float(i * 5 % 50),
             "segmented_percent": 100.0,
             "number_available_classes": 20,
         }
-        for i in range(10)
+        for i in range(12)
     ]
     city = make_city(data, "sliced-city", many_rows)
 
     # Save sliced voronoi.part000.parquet and voronoi.part001.parquet
-    vor0 = gpd.GeoDataFrame({"segment_id": [1], "geometry": [Polygon([(0, 0), (1, 0), (1, 1), (0, 1), (0, 0)])]}, crs="EPSG:4326")
-    vor1 = gpd.GeoDataFrame({"segment_id": [2], "geometry": [Polygon([(1, 0), (2, 0), (2, 1), (1, 1), (1, 0)])]}, crs="EPSG:4326")
+    vor0 = gpd.GeoDataFrame({"segment_id": [1], "geometry": [Polygon([(-49.28, -25.48), (-49.25, -25.48), (-49.25, -25.45), (-49.28, -25.45), (-49.28, -25.48)])]}, crs="EPSG:4326")
+    vor1 = gpd.GeoDataFrame({"segment_id": [2], "geometry": [Polygon([(-49.25, -25.48), (-49.22, -25.48), (-49.22, -25.45), (-49.25, -25.45), (-49.25, -25.48)])]}, crs="EPSG:4326")
     vor0.to_parquet(city / "voronoi.part000.parquet", index=False)
     vor1.to_parquet(city / "voronoi.part001.parquet", index=False)
 
     seg = gpd.GeoDataFrame(
-        {"segment_id": [1, 2], "name": ["St 1", "St 2"], "geometry": [LineString([(0, 0), (1, 1)]), LineString([(1, 1), (2, 2)])]},
+        {"segment_id": [1, 2], "name": ["St 1", "St 2"], "geometry": [LineString([(-49.28, -25.48), (-49.25, -25.45)]), LineString([(-49.25, -25.45), (-49.22, -25.42)])]},
         crs="EPSG:4326",
     )
     seg.to_parquet(city / "segments.parquet", index=False)
 
-    # Force small max_bytes so points.geojson is sliced into multiple .partXXX.geojson files
-    bw.build(data, out, max_bytes=400)
+    # Force small max_bytes so points.pmtiles is sliced into multiple .partXXX.pmtiles files
+    bw.build(data, out, max_bytes=1200)
 
     city_out = out / "sliced-city"
-    assert not (city_out / "points.geojson").exists()
-    point_parts = sorted(city_out.glob("points.part*.geojson"))
+    assert not (city_out / "points.pmtiles").exists()
+    point_parts = sorted(city_out.glob("points.part*.pmtiles"))
     assert len(point_parts) >= 2
 
     config = json.loads((city_out / "index.html").read_text().split('id="config">')[1].split("</script>")[0])
     assert config["has_segments"] is True
     assert config["has_voronoi"] is True
     assert config["files"]["points"] == [p.name for p in point_parts]
-    total_pts = sum(len(json.loads(p.read_text())["features"]) for p in point_parts)
-    assert total_pts == 10
+    total_pts = sum(len(gpd.read_file(p)) for p in point_parts)
+    assert total_pts == 12

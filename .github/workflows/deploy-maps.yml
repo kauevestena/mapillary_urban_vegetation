@@ -53,7 +53,7 @@ jobs:
         pip install geopandas pyarrow
 
     - name: Build webmaps
-      run: python scripts/build_webmaps.py
+      run: python scripts/build_webmaps.py --reuse-pmtiles
 
     - name: Configure Pages
       uses: actions/configure-pages@v5

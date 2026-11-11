@@ -254,9 +254,9 @@ def test_parquet_and_geojson_slicing_under_size_limit(tmp_path):
     assert len(reloaded) == 20
     assert list(reloaded["segment_id"]) == list(range(20))
 
-    # 2. Force slicing of geojson by setting a tiny max_bytes
-    gj_path = tmp_path / "segments.geojson"
-    gj_parts = pss.export_geojson(gdf, gj_path, tolerance=0.0, max_bytes=500)
-    assert len(gj_parts) >= 2
-    assert not gj_path.exists()
-    assert all(p.name.startswith("segments.part") and p.name.endswith(".geojson") for p in gj_parts)
+    # 2. Force slicing of PMTiles by setting a tiny max_bytes
+    pm_path = tmp_path / "segments.pmtiles"
+    pm_parts = pss.export_pmtiles(gdf, pm_path, tolerance=0.0, max_bytes=1200)
+    assert len(pm_parts) >= 2
+    assert not pm_path.exists()
+    assert all(p.name.startswith("segments.part") and p.name.endswith(".pmtiles") for p in pm_parts)
