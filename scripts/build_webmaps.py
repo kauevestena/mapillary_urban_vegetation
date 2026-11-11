@@ -159,6 +159,11 @@ def build_city(city, out_dir):
             try:
                 vor = gpd.read_parquet(vor_file)
                 if not vor.empty:
+                    vor = vor[
+                        vor.geometry.notnull()
+                        & ~vor.geometry.is_empty
+                        & vor.geom_type.isin(["Polygon", "MultiPolygon"])
+                    ].copy()
                     # Simplify shared edges topologically while strictly preserving boundaries and coverage
                     if hasattr(shapely, "coverage_simplify"):
                         sim = shapely.coverage_simplify(vor.geometry.values, tolerance=0.00005, simplify_boundary=False)

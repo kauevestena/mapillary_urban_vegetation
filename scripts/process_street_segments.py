@@ -146,6 +146,50 @@ def densify_segment_points(segments_utm, step=1.0):
     return coords_arr, seg_ids_arr
 
 
+def _extract_polygonal(geom):
+    """Extract valid Polygon/MultiPolygon from a geometry, discarding points/lines."""
+    if geom is None or geom.is_empty:
+        return None
+    if not shapely.is_valid(geom):
+        try:
+            geom = shapely.make_valid(geom)
+        except Exception:
+            geom = shapely.buffer(geom, 0)
+    if geom is None or geom.is_empty:
+        return None
+    gtype = geom.geom_type
+    if gtype in ("Polygon", "MultiPolygon"):
+        return geom
+    if gtype == "GeometryCollection":
+        polys = [
+            part
+            for part in geom.geoms
+            if part is not None and not part.is_empty and part.geom_type in ("Polygon", "MultiPolygon")
+        ]
+        if not polys:
+            return None
+        return safe_union_cells(polys)
+    return None
+
+
+def _clean_polygonal_gdf(gdf):
+    """Ensure all rows in a GeoDataFrame are valid non-empty Polygons or MultiPolygons."""
+    gdf = gdf[gdf.geometry.notnull() & ~gdf.geometry.is_empty].copy()
+    if gdf.empty:
+        return gdf
+    geoms = gdf.geometry.values
+    needs_clean = (~shapely.is_valid(geoms)) | (~gdf.geom_type.isin(["Polygon", "MultiPolygon"]).values)
+    if needs_clean.any():
+        geoms = geoms.copy()
+        for idx in np.where(needs_clean)[0]:
+            geoms[idx] = _extract_polygonal(geoms[idx])
+        gdf["geometry"] = geoms
+        gdf = gdf[
+            gdf.geometry.notnull() & ~gdf.geometry.is_empty & gdf.geom_type.isin(["Polygon", "MultiPolygon"])
+        ].copy()
+    return gdf
+
+
 def safe_union_cells(cell_list):
     """Robustly union a list of Voronoi polygon cells handling GEOS topology edge cases."""
     if len(cell_list) == 1:
@@ -171,15 +215,42 @@ def fill_boundary_gaps(voronoi_gdf, boundary_geom, area_threshold=None):
     Any residual gaps between the Voronoi coverage and boundary are merged
     into the adjacent Voronoi polygon sharing the longest boundary.
     """
+    voronoi_gdf = _clean_polygonal_gdf(voronoi_gdf)
+    if voronoi_gdf.empty:
+        return voronoi_gdf
+
+    is_geographic = bool(voronoi_gdf.crs and voronoi_gdf.crs.is_geographic)
     if area_threshold is None:
-        is_geographic = voronoi_gdf.crs and voronoi_gdf.crs.is_geographic
         area_threshold = 1e-14 if is_geographic else 1e-6
-    vor_union = shapely.unary_union(voronoi_gdf.geometry)
-    diff = boundary_geom.difference(vor_union)
+    grid_size = 1e-8 if is_geographic else 1e-3
+
+    geoms_arr = voronoi_gdf.geometry.values
+    try:
+        vor_union = shapely.unary_union(geoms_arr)
+    except Exception:
+        try:
+            vor_union = shapely.coverage_union_all(geoms_arr)
+        except Exception:
+            vor_union = shapely.unary_union(
+                shapely.set_precision(geoms_arr, grid_size), grid_size=grid_size
+            )
+
+    try:
+        diff = boundary_geom.difference(vor_union)
+    except Exception:
+        b_prec = shapely.set_precision(boundary_geom, grid_size)
+        u_prec = shapely.set_precision(vor_union, grid_size)
+        diff = shapely.difference(b_prec, u_prec, grid_size=grid_size)
+
     if diff.is_empty or diff.area < area_threshold:
         return voronoi_gdf
 
-    gaps = [g for g in (diff.geoms if hasattr(diff, "geoms") else [diff]) if g.area >= area_threshold]
+    raw_gaps = diff.geoms if hasattr(diff, "geoms") else [diff]
+    gaps = []
+    for g in raw_gaps:
+        poly_g = _extract_polygonal(g)
+        if poly_g is not None and poly_g.area >= area_threshold:
+            gaps.append(poly_g)
     if not gaps:
         return voronoi_gdf
 
@@ -191,14 +262,28 @@ def fill_boundary_gaps(voronoi_gdf, boundary_geom, area_threshold=None):
         if not possible_indices:
             continue
         candidates = geoms.iloc[possible_indices]
-        shared_lengths = [gap.intersection(c).length for c in candidates]
+        shared_lengths = []
+        for c in candidates:
+            try:
+                shared_lengths.append(gap.intersection(c).length)
+            except Exception:
+                shared_lengths.append(0.0)
         if max(shared_lengths) > 0:
             best_idx = possible_indices[int(np.argmax(shared_lengths))]
-            geoms.iloc[best_idx] = shapely.unary_union([geoms.iloc[best_idx], gap])
         else:
             dists = [gap.distance(c) for c in candidates]
             best_idx = possible_indices[int(np.argmin(dists))]
-            geoms.iloc[best_idx] = shapely.unary_union([geoms.iloc[best_idx], gap])
+
+        try:
+            merged = shapely.unary_union([geoms.iloc[best_idx], gap])
+        except Exception:
+            merged = shapely.unary_union(
+                shapely.set_precision([geoms.iloc[best_idx], gap], grid_size),
+                grid_size=grid_size,
+            )
+        merged_poly = _extract_polygonal(merged)
+        if merged_poly is not None:
+            geoms.iloc[best_idx] = merged_poly
 
     voronoi_gdf["geometry"] = geoms
     return voronoi_gdf
@@ -429,9 +514,9 @@ def attribute_vegetation_statistics(segments_gdf, voronoi_gdf, points_gdf, utm_c
     merged_segs["image_density"] = density.round(2)
     segments_gdf = gpd.GeoDataFrame(merged_segs, geometry="geometry", crs=segments_gdf.crs)
 
-    merged_vor = voronoi_gdf.merge(stats_df, on="segment_id", how="left")
+    density_map = merged_segs[["segment_id", "image_density"]]
+    merged_vor = voronoi_gdf.merge(stats_df, on="segment_id", how="left").merge(density_map, on="segment_id", how="left")
     merged_vor["count"] = merged_vor["count"].fillna(0).astype(int)
-    merged_vor["image_density"] = merged_segs["image_density"]
     voronoi_gdf = gpd.GeoDataFrame(merged_vor, geometry="geometry", crs=voronoi_gdf.crs)
 
     return segments_gdf, voronoi_gdf
@@ -481,11 +566,9 @@ def process_city(
     voronoi_path = city_dir / "voronoi.parquet"
 
     # Step 1: Road network & street segments
-    if segments_path.exists() and voronoi_path.exists() and not rebuild_network:
+    if segments_path.exists() and not rebuild_network:
         print(f"   Loading existing road segments from {segments_path.name}")
         segments = gpd.read_parquet(segments_path)
-        voronoi = gpd.read_parquet(voronoi_path)
-        utm_crs = segments.estimate_utm_crs()
     else:
         print(f"   Downloading OSM road network ({network_type})...")
         segments = fetch_street_network(boundary_geom, network_type=network_type)
@@ -495,7 +578,12 @@ def process_city(
         segments.to_parquet(segments_path, index=False)
         print(f"   Saved initial {segments_path.name}")
 
-        # Step 2: Line Voronoi synthesis
+    # Step 2: Line Voronoi synthesis
+    if voronoi_path.exists() and not rebuild_network:
+        print(f"   Loading existing Line Voronoi from {voronoi_path.name}")
+        voronoi = _clean_polygonal_gdf(gpd.read_parquet(voronoi_path))
+        utm_crs = segments.estimate_utm_crs()
+    else:
         print(f"   Generating Line Voronoi polygons (step={step}m)...")
         voronoi, utm_crs = generate_line_voronoi(segments, boundary_geom, step=step)
         voronoi.to_parquet(voronoi_path, index=False)

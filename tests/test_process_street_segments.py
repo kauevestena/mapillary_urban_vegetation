@@ -210,6 +210,22 @@ def test_fill_boundary_gaps():
     assert diff.area == pytest.approx(0.0, abs=1e-12)
 
 
+def test_fill_boundary_gaps_filters_non_polygonal_and_self_intersections():
+    # Bowtie self-intersecting polygon + a stray Point from boundary clipping
+    bowtie = Polygon([(0, 0), (5, 10), (5, 0), (0, 10)])
+    p2 = Polygon([(5, 0), (10, 0), (10, 10), (5, 10)])
+    pt = Point(10, 10)
+    boundary = Polygon([(0, 0), (10, 0), (10, 10), (0, 10)])
+
+    gdf = gpd.GeoDataFrame({"segment_id": [1, 2, 3], "geometry": [bowtie, p2, pt]}, crs="EPSG:4326")
+    filled = pss.fill_boundary_gaps(gdf, boundary)
+
+    assert all(filled.geom_type.isin(["Polygon", "MultiPolygon"]))
+    import shapely
+    diff = boundary.difference(shapely.unary_union(filled.geometry))
+    assert diff.area == pytest.approx(0.0, abs=1e-12)
+
+
 def test_export_geojson(tmp_path):
     s = LineString([(0, 0), (1, 1)])
     gdf = gpd.GeoDataFrame({"segment_id": [1], "geometry": [s]}, crs="EPSG:4326")
