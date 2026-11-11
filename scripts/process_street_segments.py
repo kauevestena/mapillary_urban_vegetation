@@ -43,6 +43,132 @@ from shapely.geometry import MultiPoint, box, mapping, shape
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
+# Maximum file size before slicing into .partXXX files (< 100 MB GitHub limit)
+MAX_GITHUB_FILE_BYTES = 90 * 1024 * 1024
+
+
+def parquet_parts(path):
+    """Return existing file path(s) for a logical parquet path (single file or .partXXX slices)."""
+    path = Path(path)
+    if path.exists():
+        return [path]
+    return sorted(path.parent.glob(f"{path.stem}.part*{path.suffix}"))
+
+
+def parquet_exists(path):
+    """True if either the single parquet file or its .partXXX slices exist."""
+    return bool(parquet_parts(path))
+
+
+def read_parquet_sliced(path):
+    """Read a GeoParquet dataset from a single file or .partXXX slices."""
+    parts = parquet_parts(path)
+    if not parts:
+        raise FileNotFoundError(f"No parquet file or slices found for {path}")
+    if len(parts) == 1:
+        return gpd.read_parquet(parts[0])
+    frames = [gpd.read_parquet(p) for p in parts]
+    crs = frames[0].crs
+    combined = pd.concat(frames, ignore_index=True)
+    return gpd.GeoDataFrame(combined, geometry="geometry", crs=crs)
+
+
+def write_parquet_sliced(gdf, path, max_bytes=MAX_GITHUB_FILE_BYTES):
+    """Write a GeoDataFrame to `path`, or slice into `<stem>.partXXX.parquet` files if > max_bytes."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_main = path.parent / f"{path.name}.tmp"
+    gdf.to_parquet(tmp_main, index=False)
+    total_size = tmp_main.stat().st_size
+
+    if total_size <= max_bytes or len(gdf) <= 1:
+        for old_part in path.parent.glob(f"{path.stem}.part*{path.suffix}"):
+            old_part.unlink(missing_ok=True)
+        os.replace(tmp_main, path)
+        return [path]
+
+    tmp_main.unlink(missing_ok=True)
+    n_initial = max(2, math.ceil(total_size / (max_bytes * 0.85)))
+    initial_Pass = [gdf.iloc[idx] for idx in np.array_split(np.arange(len(gdf)), n_initial) if len(idx) > 0]
+
+    chunk_tmps = []
+
+    def _write_chunk(sub_gdf):
+        tmp_chunk = path.parent / f"{path.stem}.chunk_{len(chunk_tmps)}.tmp"
+        sub_gdf.to_parquet(tmp_chunk, index=False)
+        if tmp_chunk.stat().st_size > max_bytes and len(sub_gdf) > 1:
+            tmp_chunk.unlink(missing_ok=True)
+            mid = len(sub_gdf) // 2
+            _write_chunk(sub_gdf.iloc[:mid])
+            _write_chunk(sub_gdf.iloc[mid:])
+        else:
+            chunk_tmps.append(tmp_chunk)
+
+    for sub in initial_Pass:
+        _write_chunk(sub)
+
+    path.unlink(missing_ok=True)
+    for old_part in path.parent.glob(f"{path.stem}.part*{path.suffix}"):
+        old_part.unlink(missing_ok=True)
+
+    written = []
+    for i, tmp_chunk in enumerate(chunk_tmps):
+        part_path = path.parent / f"{path.stem}.part{i:03d}{path.suffix}"
+        os.replace(tmp_chunk, part_path)
+        written.append(part_path)
+    return written
+
+
+def write_geojson_sliced(data, path, max_bytes=MAX_GITHUB_FILE_BYTES):
+    """Write a GeoJSON FeatureCollection to `path`, or slice into `<stem>.partXXX.geojson` if > max_bytes."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    raw = json.dumps(data, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    features = data.get("features", [])
+
+    if len(raw) <= max_bytes or len(features) <= 1:
+        for old_part in path.parent.glob(f"{path.stem}.part*{path.suffix}"):
+            old_part.unlink(missing_ok=True)
+        tmp = path.parent / f"{path.name}.tmp"
+        tmp.write_bytes(raw)
+        os.replace(tmp, path)
+        return [path]
+
+    n_initial = max(2, math.ceil(len(raw) / (max_bytes * 0.85)))
+    step_size = math.ceil(len(features) / n_initial)
+    initial_slices = [features[i : i + step_size] for i in range(0, len(features), step_size)]
+
+    encoded_chunks = []
+
+    def _encode_slice(sub_feats):
+        sub_bytes = json.dumps(
+            {"type": "FeatureCollection", "features": sub_feats},
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        if len(sub_bytes) > max_bytes and len(sub_feats) > 1:
+            mid = len(sub_feats) // 2
+            _encode_slice(sub_feats[:mid])
+            _encode_slice(sub_feats[mid:])
+        else:
+            encoded_chunks.append(sub_bytes)
+
+    for s in initial_slices:
+        _encode_slice(s)
+
+    path.unlink(missing_ok=True)
+    for old_part in path.parent.glob(f"{path.stem}.part*{path.suffix}"):
+        old_part.unlink(missing_ok=True)
+
+    written = []
+    for i, chunk_bytes in enumerate(encoded_chunks):
+        part_path = path.parent / f"{path.stem}.part{i:03d}{path.suffix}"
+        tmp = path.parent / f"{part_path.name}.tmp"
+        tmp.write_bytes(chunk_bytes)
+        os.replace(tmp, part_path)
+        written.append(part_path)
+    return written
+
 
 def slugify(text):
     """Normalize a place name into a filesystem-safe folder slug."""
@@ -522,8 +648,8 @@ def attribute_vegetation_statistics(segments_gdf, voronoi_gdf, points_gdf, utm_c
     return segments_gdf, voronoi_gdf
 
 
-def export_geojson(gdf, out_path, tolerance=0.00002):
-    """Export GeoDataFrame as a lightweight GeoJSON file with simplified geometries."""
+def export_geojson(gdf, out_path, tolerance=0.00002, max_bytes=MAX_GITHUB_FILE_BYTES):
+    """Export GeoDataFrame as a lightweight GeoJSON file (or <100 MB slices) with simplified geometries."""
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -540,10 +666,7 @@ def export_geojson(gdf, out_path, tolerance=0.00002):
         else:
             simplified["geometry"] = simplified.geometry.simplify(tolerance, preserve_topology=True)
 
-    tmp_path = f"{out_path}.tmp"
-    with open(tmp_path, "w", encoding="utf-8") as f:
-        f.write(simplified.to_json(drop_id=True))
-    os.replace(tmp_path, out_path)
+    return write_geojson_sliced(json.loads(simplified.to_json(drop_id=True)), out_path, max_bytes=max_bytes)
 
 
 def process_city(
@@ -566,27 +689,27 @@ def process_city(
     voronoi_path = city_dir / "voronoi.parquet"
 
     # Step 1: Road network & street segments
-    if segments_path.exists() and not rebuild_network:
+    if parquet_exists(segments_path) and not rebuild_network:
         print(f"   Loading existing road segments from {segments_path.name}")
-        segments = gpd.read_parquet(segments_path)
+        segments = read_parquet_sliced(segments_path)
     else:
         print(f"   Downloading OSM road network ({network_type})...")
         segments = fetch_street_network(boundary_geom, network_type=network_type)
         print(f"   Extracted {len(segments):,} physical street segments.")
 
         # Save initial segments parquet
-        segments.to_parquet(segments_path, index=False)
+        write_parquet_sliced(segments, segments_path)
         print(f"   Saved initial {segments_path.name}")
 
     # Step 2: Line Voronoi synthesis
-    if voronoi_path.exists() and not rebuild_network:
+    if parquet_exists(voronoi_path) and not rebuild_network:
         print(f"   Loading existing Line Voronoi from {voronoi_path.name}")
-        voronoi = _clean_polygonal_gdf(gpd.read_parquet(voronoi_path))
+        voronoi = _clean_polygonal_gdf(read_parquet_sliced(voronoi_path))
         utm_crs = segments.estimate_utm_crs()
     else:
         print(f"   Generating Line Voronoi polygons (step={step}m)...")
         voronoi, utm_crs = generate_line_voronoi(segments, boundary_geom, step=step)
-        voronoi.to_parquet(voronoi_path, index=False)
+        write_parquet_sliced(voronoi, voronoi_path)
         print(f"   Saved initial {voronoi_path.name} ({len(voronoi):,} polygons)")
 
     # Step 3: Load Mapillary data points
@@ -599,11 +722,11 @@ def process_city(
         segments, voronoi, points, utm_crs, min_photos=min_photos
     )
 
-    # Step 5: Overwrite segments.parquet and voronoi.parquet
-    segments.to_parquet(segments_path, index=False)
-    voronoi.to_parquet(voronoi_path, index=False)
-    print(f"✅ Overwrote {segments_path.name} with joined descriptive statistics.")
-    print(f"✅ Overwrote {voronoi_path.name} with joined descriptive statistics.")
+    # Step 5: Overwrite segments.parquet and voronoi.parquet (slicing if > 90 MiB)
+    seg_written = write_parquet_sliced(segments, segments_path)
+    vor_written = write_parquet_sliced(voronoi, voronoi_path)
+    print(f"✅ Wrote {', '.join(p.name for p in seg_written)} with joined descriptive statistics.")
+    print(f"✅ Wrote {', '.join(p.name for p in vor_written)} with joined descriptive statistics.")
 
     # Step 6: Optional webmap GeoJSON export
     if export_webmap:

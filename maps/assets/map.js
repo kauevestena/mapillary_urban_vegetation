@@ -358,11 +358,25 @@ async function initCityMap(config) {
       .then((r) => (r.ok ? r.json() : null))
       .catch(() => null);
 
+  async function fetchLayerGeoJson(filesList, fallbackUrl) {
+    const urls = Array.isArray(filesList) ? filesList : (fallbackUrl ? [fallbackUrl] : []);
+    if (urls.length === 0) return null;
+    const parts = await Promise.all(urls.map(fetchJson));
+    const validParts = parts.filter((p) => p && Array.isArray(p.features));
+    if (validParts.length === 0) return null;
+    if (validParts.length === 1) return validParts[0];
+    return {
+      type: "FeatureCollection",
+      features: validParts.flatMap((p) => p.features),
+    };
+  }
+
+  const files = config.files || {};
   const [points, boundary, segments, voronoi] = await Promise.all([
-    fetchJson("points.geojson"),
+    fetchLayerGeoJson(files.points, "points.geojson"),
     fetchJson("boundary.geojson"),
-    fetchJson("segments.geojson"),
-    fetchJson("voronoi.geojson"),
+    fetchLayerGeoJson(files.segments, config.has_segments === false ? [] : "segments.geojson"),
+    fetchLayerGeoJson(files.voronoi, config.has_voronoi === false ? [] : "voronoi.geojson"),
   ]);
 
   const hasSegments = !!segments && segments.features && segments.features.length > 0;

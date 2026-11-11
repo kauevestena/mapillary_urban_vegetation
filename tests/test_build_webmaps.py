@@ -131,3 +131,55 @@ def test_build_with_segments_and_voronoi(tmp_path):
     config = json.loads((city_out / "index.html").read_text().split('id="config">')[1].split("</script>")[0])
     assert config["has_segments"] is True
     assert config["has_voronoi"] is True
+    assert config["files"] == {
+        "points": ["points.geojson"],
+        "segments": ["segments.geojson"],
+        "voronoi": ["voronoi.geojson"],
+    }
+
+
+def test_build_with_sliced_parquet_and_sliced_geojson(tmp_path):
+    from shapely.geometry import LineString, Polygon
+    data, out = tmp_path / "data", tmp_path / "maps"
+    many_rows = [
+        {
+            "id": str(i),
+            "captured_at": 1749300000000 + i * 1000,
+            "lon": -49.25 + i * 0.001,
+            "lat": -25.45 + i * 0.001,
+            "h": 900.0 + i,
+            "h_computed": 1.0,
+            "vegetation_percent": float(i * 5 % 50),
+            "segmented_percent": 100.0,
+            "number_available_classes": 20,
+        }
+        for i in range(10)
+    ]
+    city = make_city(data, "sliced-city", many_rows)
+
+    # Save sliced voronoi.part000.parquet and voronoi.part001.parquet
+    vor0 = gpd.GeoDataFrame({"segment_id": [1], "geometry": [Polygon([(0, 0), (1, 0), (1, 1), (0, 1), (0, 0)])]}, crs="EPSG:4326")
+    vor1 = gpd.GeoDataFrame({"segment_id": [2], "geometry": [Polygon([(1, 0), (2, 0), (2, 1), (1, 1), (1, 0)])]}, crs="EPSG:4326")
+    vor0.to_parquet(city / "voronoi.part000.parquet", index=False)
+    vor1.to_parquet(city / "voronoi.part001.parquet", index=False)
+
+    seg = gpd.GeoDataFrame(
+        {"segment_id": [1, 2], "name": ["St 1", "St 2"], "geometry": [LineString([(0, 0), (1, 1)]), LineString([(1, 1), (2, 2)])]},
+        crs="EPSG:4326",
+    )
+    seg.to_parquet(city / "segments.parquet", index=False)
+
+    # Force small max_bytes so points.geojson is sliced into multiple .partXXX.geojson files
+    bw.build(data, out, max_bytes=400)
+
+    city_out = out / "sliced-city"
+    assert not (city_out / "points.geojson").exists()
+    point_parts = sorted(city_out.glob("points.part*.geojson"))
+    assert len(point_parts) >= 2
+
+    config = json.loads((city_out / "index.html").read_text().split('id="config">')[1].split("</script>")[0])
+    assert config["has_segments"] is True
+    assert config["has_voronoi"] is True
+    assert config["files"]["points"] == [p.name for p in point_parts]
+    total_pts = sum(len(json.loads(p.read_text())["features"]) for p in point_parts)
+    assert total_pts == 10

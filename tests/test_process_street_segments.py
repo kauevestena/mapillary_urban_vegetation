@@ -236,3 +236,27 @@ def test_export_geojson(tmp_path):
     loaded = gpd.read_file(out_file)
     assert len(loaded) == 1
     assert loaded["segment_id"].iloc[0] == 1
+
+
+def test_parquet_and_geojson_slicing_under_size_limit(tmp_path):
+    lines = [LineString([(i, 0), (i, 1)]) for i in range(20)]
+    gdf = gpd.GeoDataFrame({"segment_id": list(range(20)), "geometry": lines}, crs="EPSG:4326")
+
+    # 1. Force slicing of parquet by setting a tiny max_bytes
+    pq_path = tmp_path / "voronoi.parquet"
+    parts = pss.write_parquet_sliced(gdf, pq_path, max_bytes=3500)
+    assert len(parts) >= 2
+    assert not pq_path.exists()
+    assert all(p.name.startswith("voronoi.part") and p.name.endswith(".parquet") for p in parts)
+    assert pss.parquet_exists(pq_path)
+
+    reloaded = pss.read_parquet_sliced(pq_path)
+    assert len(reloaded) == 20
+    assert list(reloaded["segment_id"]) == list(range(20))
+
+    # 2. Force slicing of geojson by setting a tiny max_bytes
+    gj_path = tmp_path / "segments.geojson"
+    gj_parts = pss.export_geojson(gdf, gj_path, tolerance=0.0, max_bytes=500)
+    assert len(gj_parts) >= 2
+    assert not gj_path.exists()
+    assert all(p.name.startswith("segments.part") and p.name.endswith(".geojson") for p in gj_parts)
