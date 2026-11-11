@@ -414,6 +414,21 @@ def build_city(city, out_dir, max_bytes=MAX_GITHUB_FILE_BYTES, reuse_pmtiles=Fal
             max_bytes=max_bytes,
         )
 
+    downloads = {"segments": [], "voronoi": [], "points": []}
+    if city_dir:
+        pts_pq = city_dir / "points.parquet"
+        if not parquet_exists(pts_pq) and not city["points"].empty:
+            try:
+                pts_gdf = gpd.GeoDataFrame(city["points"], geometry="geometry", crs="EPSG:4326")
+                pts_gdf.to_parquet(pts_pq, index=False)
+            except Exception:
+                pass
+        downloads = {
+            "segments": [p.name for p in parquet_parts(city_dir / "segments.parquet")],
+            "voronoi": [p.name for p in parquet_parts(city_dir / "voronoi.parquet")],
+            "points": [p.name for p in parquet_parts(pts_pq)],
+        }
+
     config = {
         "slug": city["slug"],
         "name": city["name"],
@@ -428,6 +443,7 @@ def build_city(city, out_dir, max_bytes=MAX_GITHUB_FILE_BYTES, reuse_pmtiles=Fal
             "voronoi": voronoi_files,
             "boundary": boundary_files,
         },
+        "downloads": downloads,
     }
 
     (city_out / "index.html").write_text(

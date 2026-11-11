@@ -827,9 +827,12 @@ def process_city(
         write_parquet_sliced(voronoi, voronoi_path)
         print(f"   Saved initial {voronoi_path.name} ({len(voronoi):,} polygons)")
 
-    # Step 3: Load Mapillary data points
+    # Step 3: Load Mapillary data points and save points.parquet
     points = load_mapillary_points(city_dir)
     print(f"   Loaded {len(points):,} Mapillary images from completed tiles.")
+    if not points.empty:
+        pts_written = write_parquet_sliced(points, city_dir / "points.parquet")
+        print(f"✅ Wrote {', '.join(p.name for p in pts_written)} ({len(points):,} points).")
 
     # Step 4: Attribute descriptive statistics
     print(f"   Computing descriptive statistics for segments (min_photos={min_photos})...")

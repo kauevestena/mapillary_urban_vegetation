@@ -189,6 +189,57 @@ a { color: var(--accent); }
   accent-color: var(--accent);
 }
 
+/* Collapsible download section inside controls panel */
+.download-section {
+  border-top: 1px solid var(--border);
+  padding-top: 6px;
+  font-size: 12px;
+}
+.download-section summary {
+  cursor: pointer;
+  user-select: none;
+  padding: 2px 0;
+  color: var(--text-primary);
+}
+.download-section summary:hover {
+  color: var(--accent);
+}
+.download-links {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-top: 6px;
+}
+.download-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.download-label {
+  color: var(--text-secondary);
+  flex: none;
+}
+.download-parts {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px 6px;
+}
+.download-link {
+  text-decoration: none;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.download-link:hover {
+  border-color: var(--accent);
+  text-decoration: underline;
+}
+
 /* popups follow the panel theme */
 .maplibregl-popup-content {
   background: var(--surface);

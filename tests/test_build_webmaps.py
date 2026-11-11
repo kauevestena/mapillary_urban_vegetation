@@ -135,7 +135,10 @@ def test_build_with_segments_and_voronoi(tmp_path):
     assert (city_out / "points.pmtiles").exists()
     assert (city_out / "boundary.pmtiles").exists()
 
-    config = json.loads((city_out / "index.html").read_text().split('id="config">')[1].split("</script>")[0])
+    page_html = (city_out / "index.html").read_text()
+    assert 'id="download-section"' in page_html
+    assert "<details id=\"download-section\" class=\"download-section\">" in page_html
+    config = json.loads(page_html.split('id="config">')[1].split("</script>")[0])
     assert config["has_segments"] is True
     assert config["has_voronoi"] is True
     assert config["files"] == {
@@ -144,6 +147,12 @@ def test_build_with_segments_and_voronoi(tmp_path):
         "voronoi": ["voronoi.pmtiles"],
         "boundary": ["boundary.pmtiles"],
     }
+    assert config["downloads"] == {
+        "segments": ["segments.parquet"],
+        "voronoi": ["voronoi.parquet"],
+        "points": ["points.parquet"],
+    }
+    assert (city / "points.parquet").exists()
 
 
 def test_build_with_sliced_parquet_and_sliced_pmtiles(tmp_path):
@@ -189,5 +198,8 @@ def test_build_with_sliced_parquet_and_sliced_pmtiles(tmp_path):
     assert config["has_segments"] is True
     assert config["has_voronoi"] is True
     assert config["files"]["points"] == [p.name for p in point_parts]
+    assert config["downloads"]["segments"] == ["segments.parquet"]
+    assert config["downloads"]["voronoi"] == ["voronoi.part000.parquet", "voronoi.part001.parquet"]
+    assert len(config["downloads"]["points"]) >= 1
     total_pts = sum(len(gpd.read_file(p)) for p in point_parts)
     assert total_pts == 12

@@ -303,6 +303,67 @@ function renderCityStats(config) {
   for (const [term, value] of rows) list.append(el("dt", {}, term), el("dd", {}, value));
 }
 
+const RAW_DATA_BASE = "https://raw.githubusercontent.com/kauevestena/mapillary_urban_vegetation/main/data";
+
+function renderDownloadSection(config) {
+  const container = document.getElementById("download-links");
+  if (!container) return;
+  container.replaceChildren();
+
+  const downloads = config.downloads || {};
+  const baseUrl = `${RAW_DATA_BASE}/${encodeURIComponent(config.slug)}`;
+  const layers = [
+    { key: "segments", label: "Streets" },
+    { key: "voronoi", label: "Line Voronoi" },
+    { key: "points", label: "Photos" },
+  ];
+
+  for (const { key, label } of layers) {
+    const fileList = Array.isArray(downloads[key]) ? downloads[key] : [];
+    const row = el("div", { class: "download-row" });
+    row.appendChild(el("span", { class: "download-label" }, label));
+
+    if (fileList.length === 0) {
+      row.appendChild(el("span", { class: "muted" }, "–"));
+    } else if (fileList.length === 1) {
+      const filename = fileList[0];
+      row.appendChild(
+        el(
+          "a",
+          {
+            href: `${baseUrl}/${encodeURIComponent(filename)}`,
+            download: filename,
+            target: "_blank",
+            rel: "noopener",
+            class: "download-link",
+          },
+          filename
+        )
+      );
+    } else {
+      const partsBox = el("div", { class: "download-parts" });
+      fileList.forEach((filename, idx) => {
+        partsBox.appendChild(
+          el(
+            "a",
+            {
+              href: `${baseUrl}/${encodeURIComponent(filename)}`,
+              download: filename,
+              target: "_blank",
+              rel: "noopener",
+              class: "download-link",
+              title: filename,
+            },
+            `part ${idx + 1}`
+          )
+        );
+      });
+      row.appendChild(partsBox);
+    }
+    container.appendChild(row);
+  }
+}
+
 function segmentPopupContent(p, currentMetric) {
   const box = el("div", { class: "segment-popup" });
   const title = p.name && p.name !== "None" ? p.name : "Unnamed street";
@@ -378,6 +439,7 @@ async function initCityMap(config) {
   let currentMetric = "veg_median";
   applyTheme(basemap);
   renderCityStats(config);
+  renderDownloadSection(config);
   renderLegend(theme(basemap), currentMetric);
   setupInfoToggle();
 

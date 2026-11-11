@@ -38,6 +38,10 @@
             <label id="lbl-points"><input type="checkbox" id="layer-points"> Photos</label>
           </div>
         </div>
+        <details id="download-section" class="download-section">
+          <summary><strong>Download</strong> <span class="muted">(GeoParquet)</span></summary>
+          <div id="download-links" class="download-links"></div>
+        </details>
       </div>
       <dl id="stats"></dl>
       <div id="legend" class="legend"></div>
@@ -47,7 +51,7 @@
 
   <div id="basemaps" class="panel" role="group" aria-label="Basemap"></div>
 
-  <script type="application/json" id="config">{"slug": "palotina-parana-brazil", "name": "Palotina", "display_name": "Palotina, Paraná, Região Sul, Brasil", "bounds": [-53.9665566, -24.4674687, -53.6615704, -24.1197867], "stats": {"images": 145120, "vegetation_median": 13.3, "vegetation_mean": 15.7, "date_min": "2021-10-26", "date_max": "2026-09-17", "tiles_completed": 172, "tiles_total": 172, "updated": "2026-09-29"}, "has_segments": true, "has_voronoi": true, "files": {"points": ["points.pmtiles"], "segments": ["segments.pmtiles"], "voronoi": ["voronoi.pmtiles"], "boundary": ["boundary.pmtiles"]}}</script>
+  <script type="application/json" id="config">{"slug": "palotina-parana-brazil", "name": "Palotina", "display_name": "Palotina, Paraná, Região Sul, Brasil", "bounds": [-53.9665566, -24.4674687, -53.6615704, -24.1197867], "stats": {"images": 145120, "vegetation_median": 13.3, "vegetation_mean": 15.7, "date_min": "2021-10-26", "date_max": "2026-09-17", "tiles_completed": 172, "tiles_total": 172, "updated": "2026-09-29"}, "has_segments": true, "has_voronoi": true, "files": {"points": ["points.pmtiles"], "segments": ["segments.pmtiles"], "voronoi": ["voronoi.pmtiles"], "boundary": ["boundary.pmtiles"]}, "downloads": {"segments": ["segments.parquet"], "voronoi": ["voronoi.parquet"], "points": ["points.parquet"]}}</script>
   <script src="https://cdn.jsdelivr.net/npm/maplibre-gl@5/dist/maplibre-gl.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/pmtiles@3/dist/pmtiles.js"></script>
   <script src="../assets/map.js"></script>
