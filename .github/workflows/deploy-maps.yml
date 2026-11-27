@@ -15,32 +15,39 @@ on:
       - maps/**
       - .github/workflows/deploy-maps.yml
 
+  pull_request:
+    branches: [ main ]
+    paths:
+      - scripts/build_webmaps.py
+      - scripts/webmap/**
+      - maps/**
+      - .github/workflows/deploy-maps.yml
+
   workflow_dispatch:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
-# one deployment at a time; a newer one replaces a queued one
+# Serialize production deployments without blocking them on PR validation.
 concurrency:
-  group: pages
+  group: ${{ github.event_name == 'pull_request' && format('pages-pr-{0}', github.event.pull_request.number) || 'pages' }}
   cancel-in-progress: false
 
 jobs:
-  deploy:
-    # skip failed or cancelled fetches
+  build:
+    # Skip failed or cancelled fetches.
     if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+    outputs:
+      artifact_name: ${{ steps.package.outputs.name }}
 
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
       with:
-        ref: main  # includes the data committed by the fetch run
+        # A successful fetch commits new data to main; PRs validate their own changes.
+        ref: ${{ github.event_name == 'workflow_run' && 'main' || github.sha }}
+        persist-credentials: false
 
     - name: Set up Python
       uses: actions/setup-python@v5
@@ -55,14 +62,35 @@ jobs:
     - name: Build webmaps
       run: python scripts/build_webmaps.py --reuse-pmtiles
 
-    - name: Configure Pages
-      uses: actions/configure-pages@v5
+    - name: Name the Pages artifact
+      id: package
+      # A full rerun must not select another artifact from the same workflow run.
+      run: echo "name=github-pages-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_OUTPUT"
 
     - name: Upload site
       uses: actions/upload-pages-artifact@v3
       with:
+        name: ${{ steps.package.outputs.name }}
         path: maps
+
+  deploy:
+    # The job boundary gives the finalized artifact time to become visible.
+    # Re-running only this job reuses the successful build's artifact.
+    needs: build
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+    - name: Configure Pages
+      uses: actions/configure-pages@v5
 
     - name: Deploy to GitHub Pages
       id: deployment
       uses: actions/deploy-pages@v4
+      with:
+        artifact_name: ${{ needs.build.outputs.artifact_name }}
